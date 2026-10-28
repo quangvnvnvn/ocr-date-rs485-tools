@@ -1,0 +1,7 @@
+{
+  "explorer.excludeGitIgnore": true,
+  "git.openRepositoryInParentFolders": "always",
+  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+  "python.terminal.activateEnvironment": true,
+  "search.useIgnoreFiles": true
+}
