@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+date_ocr/data/debug/
+date_ocr/data/models/
+
+serial_io_test/build/
+serial_io_test/dist/
+serial_io_test/_vendor/
+serial_io_test/dist/
