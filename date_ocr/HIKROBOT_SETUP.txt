@@ -1,0 +1,44 @@
+OCR DATE - HIKROBOT HARDWARE TRIGGER
+====================================
+
+LUONG HOAT DONG
+PLC/cam bien -> day trigger -> Line0/Line1 cua camera Hikrobot
+Camera -> GigE/USB -> MVS SDK -> OCR DATE -> PASS/FAIL tren man hinh
+
+Che do san xuat chi ARM camera va cho frame do tin hieu dien ben ngoai tao ra.
+Nut TRIGGER TEST (SOFTWARE) chi phat mot frame chan doan roi tra ve Line0/Line1.
+
+CAI TREN MAY GAN CAMERA
+1. Cai HIKROBOT MVS 64-bit va Python SDK cua MVS.
+2. Mo MVS, chac chan thay camera, focus ro va chup duoc o Hardware Trigger.
+3. Dat Pixel Format la Mono8 (khuyen dung), Bayer8, RGB8 Packed hoac BGR8 Packed.
+4. Neu Python SDK khong o duong dan mac dinh, tao bien moi truong:
+   HIKROBOT_MVIMPORT=C:\...\MvImport
+   Thu muc nay phai chua MvCameraControl_class.py.
+5. Mo OCR_DATE.exe, chon "Camera Hikrobot - trigger ngoai", nhap serial (co the
+   de trong neu chi co mot camera), chon Line0/Line1 va bam KET NOI + ARM.
+6. Dung CAMERA LIVE de chinh lens/exposure, sau do DUNG LIVE de khoi phuc trigger.
+7. Chi khi man hinh bao "DA ARM - CHO TRIGGER" moi cho may chay.
+
+AN TOAN DU LIEU
+- Khong tu doan ky tu. ROI/OCR/confidence/ngay/AB/DM/goc/thoi gian sai deu FAIL.
+- So frame SDK bi nhay coc -> FAIL_FRAME_GAP.
+- Moc 100 ms tinh tu luc SDK giao buffer anh toi luc co quyet dinh; khong bao gom
+  exposure, truyen anh truoc SDK, PLC va co cau chap hanh.
+
+DA KIEM TRA
+- 39 unit test.
+- GUI anh tinh tren 5 anh mau.
+- GUI 13 anh cam tay va cong loi lech goc.
+- Camera Hikrobot DA9982258 da chup va replay: 45/45 PASS, doc dung 45/45,
+  tim dai toi 45/45, lon nhat 55,54 ms tren may phat trien.
+- ONNX CPU: 130/130 ket qua dung; benchmark 250/250 duoi 100 ms.
+
+CHUA KIEM TRA
+- Dien ap/canh trigger, chu ky lien tuc va toc do day chuyen thuc te.
+- Hieu nang tren may dich Core i5 Gen 8 / RAM 8 GB.
+
+Ban CPU Lite dung ONNX Runtime CPU 4 luong, khong can GPU roi, CUDA hay PyTorch.
+Can nghiem thu lai voi dung model camera, lens, den, do phan giai, exposure, CPU,
+cap va chu ky trigger truoc khi cho phep day chuyen tu dong.
+
