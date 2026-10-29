@@ -8,8 +8,8 @@
 [Setup]
 AppId={{3C38704D-89B2-44FB-ABA1-0AF396C43EB8}
 AppName=OCR DATE - Hikrobot RS485
-AppVersion=2026.10.29.3
-AppVerName=OCR DATE - Hikrobot RS485 2026.10.29.3
+AppVersion=2026.10.29.4
+AppVerName=OCR DATE - Hikrobot RS485 2026.10.29.4
 AppPublisher=OCR DATE
 DefaultDirName={code:DefaultInstallDirectory}
 DefaultGroupName=OCR DATE - Hikrobot RS485
@@ -34,9 +34,10 @@ Name: desktopicon; Description: "Tao loi tat OCR DATE tren Desktop"; Flags: chec
 [Dirs]
 Name: "{app}\data\debug"; Flags: uninsneveruninstall
 Name: "{app}\data\logs"; Flags: uninsneveruninstall
+Name: "{app}\data\production"; Flags: uninsneveruninstall
 
 [Files]
-Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "\config\config.json,\data\debug\*,\data\logs\*,\README.md"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "\config\config.json,\data\debug\*,\data\logs\*,\data\production\*,\README.md"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#InitialConfig}"; DestDir: "{app}\config"; DestName: config.json; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "HUONG_DAN_CAI_DAT.txt"; DestDir: "{app}"; Flags: ignoreversion

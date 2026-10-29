@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 date_ocr/data/debug/
+date_ocr/data/production/
 date_ocr/data/models/
 date_ocr/data/logs/
 date_ocr/data/validation/

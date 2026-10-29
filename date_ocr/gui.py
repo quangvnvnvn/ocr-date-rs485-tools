@@ -21,6 +21,7 @@ from hardware.simulated_source import TriggeredImageSource
 from hardware.hikrobot_mvs import HikrobotMvsSource
 from hardware.rs485_ejector import EjectorSettings, ModbusOutput, TimedEjector, EjectorError
 from gui_theme import apply_theme
+from production_log import DailyProductionLog, now_local
 
 
 def optimize_process_priority():
@@ -124,8 +125,9 @@ class CameraWorker(QThread):
         super().__init__();self.runtime=runtime or InspectionRuntime();self.source=None
         self.expected=None;self.roi=None;self.roi_mode='auto';self.timeout_ms=100;self.output=None
         self.eject_settings=None;self.ejector=None
+        self.production=False
     def run(self):
-        records=[]
+        records=[];daily_log=None
         try:
             self.runtime.prepare(self.roi_mode=='auto',self.status.emit)
             if self.eject_settings is not None and self.eject_settings.enabled:
@@ -137,17 +139,21 @@ class CameraWorker(QThread):
                 self.ejector.start()
             self.status.emit('Đang mở camera và bật trigger cứng…')
             self.source.open();self.source.start()
-            self.output=ROOT/'data/debug'/('camera_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6])
-            self.output.mkdir(parents=True)
+            self.output=(ROOT/'data/production' if self.production else ROOT/'data/debug'/('camera_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]))
+            self.output.mkdir(parents=True,exist_ok=True)
+            if self.production:daily_log=DailyProductionLog(self.output,self.status.emit)
             self.armed.emit({'ready':True,'source':type(self.source).__name__})
             self.status.emit('CAMERA ĐÃ ARM • Chờ tín hiệu trigger ngoài')
             sequence=0;last_frame_id=None
             while not self.isInterruptionRequested():
+                if daily_log:daily_log.check()
                 packet=self.source.get_frame(self.timeout_ms)
                 if packet is None:continue
+                captured_at=now_local()
                 sequence+=1
                 name=f'frame_{packet.frame_id or sequence:08d}_{datetime.now().strftime("%H%M%S_%f")[:-3]}.png'
-                folder=self.output/f'{sequence:06d}_{Path(name).stem}';folder.mkdir()
+                folder=self.output if self.production else self.output/f'{sequence:06d}_{Path(name).stem}'
+                if not self.production:folder.mkdir()
                 missing=missing_frame_count(last_frame_id,packet.frame_id)
                 if packet.frame_id>0:last_frame_id=packet.frame_id
                 metadata={**packet.metadata,'frame_id':packet.frame_id,
@@ -171,20 +177,30 @@ class CameraWorker(QThread):
                         error_reason=(f'Mất {missing} frame trigger trước frame #{packet.frame_id}. '
                                       f'{previous}').strip())
                 decision_monotonic=time.perf_counter()
+                schedule_error=None
                 # Diagnostic software triggers never actuate the pneumatic valve.
                 if self.ejector is not None and metadata.get('trigger_mode')=='hardware' and report['validation']['result']!='PASS':
-                    due=self.ejector.schedule(packet.frame_id,decision_monotonic,
-                                              report['validation']['result'])
-                    report['ejector']=dict(status='SCHEDULED',frame_id=packet.frame_id,
-                        decision_monotonic=decision_monotonic,due_monotonic=due,
-                        decision_delay_ms=self.eject_settings.decision_delay_ms)
-                records.append(report)
+                    try:
+                        due=self.ejector.schedule(packet.frame_id,decision_monotonic,
+                                                  report['validation']['result'])
+                        report['ejector']=dict(status='SCHEDULED',frame_id=packet.frame_id,
+                            decision_monotonic=decision_monotonic,due_monotonic=due,
+                            decision_delay_ms=self.eject_settings.decision_delay_ms)
+                    except Exception as exc:
+                        schedule_error=exc
+                        report['validation']['error_reason']+='; Lỗi lập lịch xi lanh: '+str(exc)
+                report['production']=self.production
+                if daily_log and metadata.get('trigger_mode')=='hardware':
+                    report.setdefault('expected',dict(expected_date=self.expected.expected_date.isoformat() if self.expected.expected_date else None,ab=self.expected.ab,dm=self.expected.dm))
+                    daily_log.append(report,captured_at)
+                elif not self.production:records.append(report)
                 # The operator sees the decision before diagnostic files are written.
                 self.result.emit(report,folder,artifacts)
-                for artifact_name,array in artifacts.items():
-                    save_image(folder/f'{artifact_name}.png',array)
-                write_json(folder/'result.json',report)
-            save_report(self.output,records)
+                if schedule_error:raise EjectorError(str(schedule_error))
+                if not self.production:
+                    for artifact_name,array in artifacts.items():save_image(folder/f'{artifact_name}.png',array)
+                    write_json(folder/'result.json',report)
+            if not self.production:save_report(self.output,records)
         except Exception:
             self.error.emit(traceback.format_exc())
         finally:
@@ -192,6 +208,9 @@ class CameraWorker(QThread):
                 try:self.ejector.stop()
                 except Exception as exc:self.error.emit(f'Không tắt được DO RS485: {exc}')
                 self.ejector=None
+            if daily_log:
+                try:daily_log.close()
+                except Exception as exc:self.error.emit(str(exc))
             if self.source is not None:
                 try:self.source.stop()
                 except Exception:pass
@@ -308,7 +327,7 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName('subtitle');layout.addWidget(subtitle)
         self.controls=QWidget();self.controls.setObjectName('controls');top=QVBoxLayout(self.controls)
         top.setContentsMargins(12,10,12,10);top.setSpacing(8);layout.addWidget(self.controls)
-        self.mode_tabs=QTabWidget();top.addWidget(self.mode_tabs)
+        self.mode_tabs=QTabWidget();self.mode_tabs.setObjectName('operatorModes');self.mode_tabs.tabBar().setObjectName('modeBar');top.addWidget(self.mode_tabs)
         pages=[]
         for name in ('Chạy thật','Chạy thử','Test chức năng','Cài đặt'):
             page=QWidget();page_layout=QVBoxLayout(page);page_layout.setSpacing(8)
@@ -356,6 +375,7 @@ class MainWindow(QMainWindow):
         eject_actions=QHBoxLayout();diagnostics.addLayout(eject_actions)
         self.test_eject_link=QPushButton('Kiểm tra kết nối RS485');self.test_eject_link.clicked.connect(self.check_eject_link);eject_actions.addWidget(self.test_eject_link)
         self.test_eject_pulse=QPushButton('TEST NG → XI LANH');self.test_eject_pulse.clicked.connect(self.test_ng_eject)
+        self.test_eject_pulse.setObjectName('testHardware')
         self.test_eject_pulse.setToolTip('Bật DO thật một lần sau delay đã cài. Chỉ chạy khi bấm nút này; không cần camera.')
         eject_actions.addWidget(self.test_eject_pulse)
         self.eject_state=QLabel('RS485 TẮT');eject_actions.addWidget(self.eject_state);eject_actions.addStretch()
@@ -367,6 +387,7 @@ class MainWindow(QMainWindow):
         self.sample_button=button('Thử 5 ảnh mẫu',self.samples)
         bar.addStretch()
         self.save_config_button=button('LƯU CẤU HÌNH',self.save_configuration)
+        self.save_config_button.setObjectName('saveSettings')
         bar.removeWidget(self.save_config_button);configuration.addWidget(self.save_config_button)
         self.save_config_button.setShortcut('Ctrl+S')
         self.save_config_button.setToolTip('Lưu toàn bộ thiết lập hiện tại để khôi phục khi mở lại (Ctrl+S).')
@@ -396,7 +417,11 @@ class MainWindow(QMainWindow):
             production_settings.addWidget(QLabel(label));production_settings.addWidget(widget)
         production_settings.addStretch()
         production_save=QPushButton('Lưu thông số kiểm tra');production_save.clicked.connect(self.save_configuration);production_settings.addWidget(production_save)
-        self.production_state=QLabel('Camera chưa ARM · Kết nối tại tab Cài đặt');production.addWidget(self.production_state)
+        production_save.setObjectName('saveSettings')
+        self.production_state=QLabel('Camera chưa ARM · Kết nối tại tab Cài đặt');self.production_state.setObjectName('productionState');production.addWidget(self.production_state)
+        excel_bar=QHBoxLayout();production.addLayout(excel_bar)
+        excel_bar.addWidget(QLabel('Tự lưu Excel theo ngày · Không lưu ảnh'));excel_bar.addStretch()
+        excel_button=QPushButton('Mở Excel hôm nay');excel_button.clicked.connect(self.open_daily_excel);excel_bar.addWidget(excel_button)
         self.roi_mode.currentIndexChanged.connect(self.roi_mode_changed)
         roi_bar=QHBoxLayout();configuration.addLayout(roi_bar)
         self.select_roi_button=button('2. Khoanh vùng DATE',self.select_roi,roi_bar)
@@ -644,12 +669,13 @@ class MainWindow(QMainWindow):
             source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText())
         else:
             source=TriggeredImageSource(capacity=1)
-        self.camera_source=source;self.camera_frames=0;self.rows=[];self.history.setRowCount(0)
+        self.camera_source=source;self.camera_frames=0;self.camera_passes=0;self.rows=[];self.history.setRowCount(0)
         self.save_operator_settings();self.clear_result()
         self.banner.setText('ĐANG NẠP OCR & ARM CAMERA…')
         self.camera_worker.source=source;self.camera_worker.expected=expected
         self.camera_worker.roi=self.roi;self.camera_worker.roi_mode=roi_mode
         self.camera_worker.eject_settings=eject
+        self.camera_worker.production=(mode=='hikrobot' and not diagnostic)
         self.camera_worker.timeout_ms=int(self.config.get('hardware',{}).get('frame_timeout_ms',100))
         self.source_mode.setEnabled(False);self.connect_camera_button.setEnabled(False)
         self.camera_serial.setEnabled(False);self.trigger_line.setEnabled(False)
@@ -755,7 +781,7 @@ class MainWindow(QMainWindow):
             control.setEnabled(True)
         self.disconnect_camera_button.setEnabled(False);self.source_changed()
         if self.camera_frames:
-            passes=sum(r['validation']['result']=='PASS' for r,f in self.rows)
+            passes=self.camera_passes
             self.show_status(f'Đã ngắt camera · {self.camera_frames} frame · {passes} đạt · {self.camera_frames-passes} lỗi')
         elif not self.details.toPlainText():self.show_status('Camera đã ngắt.')
         if self.closing:self.close()
@@ -821,7 +847,7 @@ class MainWindow(QMainWindow):
     def on_eject_event(self,event):
         phase=event['phase'];frame=event['frame_id']
         test=bool(event.get('test'))
-        if not test and self.camera_worker.output:
+        if not test and self.camera_worker.output and not self.camera_worker.production:
             path=self.camera_worker.output/'eject_events.jsonl'
             with path.open('a',encoding='utf-8') as stream:
                 stream.write(json.dumps(event,ensure_ascii=False)+'\n')
@@ -838,16 +864,20 @@ class MainWindow(QMainWindow):
         self.append_result(report,folder);self.show_record(report,folder);self.latest_report=report
     def got_camera_result(self,report,folder,artifacts):
         self.camera_frames+=1;self.append_result(report,folder)
+        self.camera_passes+=int(report['validation']['result']=='PASS')
         self.show_record(report,folder,artifacts);self.latest_report=report
         self.test_trigger_button.setEnabled(True)
         self.show_status(f'CAMERA ĐÃ ARM • Frame {self.camera_frames} • {report["validation"]["result"]} • {report.get("processing_ms",0):.1f} ms')
     def append_result(self,report,folder):
+        if report.get('production') and len(self.rows)>=500:
+            self.rows.pop(0);self.history.removeRow(0)
         self.rows.append((report,folder));row=self.history.rowCount();self.history.insertRow(row)
         v=report['validation'];p=v.get('parsed') or {};conf=v.get('overall_confidence')
         alignment=report.get('alignment') or {};deviation=alignment.get('deviation')
         date_text=f"{p['day']:02d}/{p['month']:02d}/{p['year']}" if p else '—'
         values=[report['image'],date_text,p.get('dm','—'),p.get('ab','—'),p.get('time','—'),f'{conf:.2%}' if conf is not None else '—',f'{deviation:.2f}°' if deviation is not None else '—',f'{report.get("processing_ms",0):.1f} ms','ĐẠT' if v['result']=='PASS' else 'LỖI']
-        for col,value in enumerate(values):self.history.setItem(row,col,QTableWidgetItem(str(value)))
+        for col,value in enumerate(values):
+            item=QTableWidgetItem(str(value));item.setBackground(QColor('#edf8f1' if v['result']=='PASS' else '#fff0ed'));self.history.setItem(row,col,item)
         self.history.item(row,8).setForeground(QColor('#117449' if v['result']=='PASS' else '#b32b30'))
     def show_record(self,report,folder,artifacts=None):
         v=report['validation'];ok=v['result']=='PASS';self.banner.setText('ĐẠT  ·  PASS' if ok else 'KHÔNG ĐẠT  ·  '+v['result'])
@@ -865,6 +895,8 @@ class MainWindow(QMainWindow):
             self.image=load_image(folder/'original.png')
             bbox=report.get('bbox');self.roi=FixedROI(*bbox,self.image.shape[1],self.image.shape[0]) if bbox else None
             self.original.set_image(self.image,self.roi);self.update_roi()
+        elif report.get('production'):
+            self.original.set_image(None)
         for name,view in self.views.items():
             if artifacts is not None:view.set_image(artifacts.get(name))
             else:view.set_image(load_image(folder/(name+'.png')) if (folder/(name+'.png')).exists() else None)
@@ -916,6 +948,12 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QUrl
         output=self.camera_worker.output if self.camera_frames else self.worker.output
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(output or ROOT/'data/debug')))
+    def open_daily_excel(self):
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        path=ROOT/'data/production'/f'OCR_DATE_{now_local().date().isoformat()}.xlsx'
+        if not path.exists():return self.show_status('Chưa có Excel hôm nay. Kết quả được xuất nền mỗi 5 giây và khi ngắt camera.')
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
     def closeEvent(self,event):
         self.save_operator_settings()
         if (self.worker.isRunning() or self.camera_worker.isRunning() or

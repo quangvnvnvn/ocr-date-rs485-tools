@@ -1,5 +1,5 @@
 ﻿OCR DATE - BẢN CÀI ĐẶT WINDOWS 64-BIT
-Phiên bản: 2026.10.29.3
+Phiên bản: 2026.10.29.4
 
 1. Giải nén ZIP, chạy OCR_DATE_Setup_2026-10-29.exe.
 2. Bấm Next, chọn thư mục cài đặt rồi bấm Install.
@@ -24,6 +24,10 @@ Chạy lại bộ cài vào cùng thư mục để cập nhật. Cấu hình con
 đã lưu được giữ nguyên. Không bật tự động camera hay xi lanh khi cài.
 Gỡ ứng dụng bằng Windows Settings > Apps > OCR DATE - Hikrobot RS485.
 Cấu hình và dữ liệu do bạn tạo trong data\debug, data\logs được giữ lại.
+Chạy thật không lưu ảnh. Kết quả nằm trong data\production\OCR_DATE_YYYY-MM-DD.xlsx,
+theo ngày kiểm tra (giờ Việt Nam), cập nhật mỗi 5 giây và khi ngắt camera.
+Đóng Excel trước khi tiếp tục cập nhật file. Kết quả còn chờ được giữ trong
+nhật ký phục hồi nội bộ; kết nối lại sẽ xuất tiếp. Gỡ cài đặt giữ sổ sản xuất.
 
 Bộ cài dành cho Windows 10/11 64-bit. Cần đo lại thời gian xử lý trên máy
 đích i5 Gen 8 / RAM 8 GB và hiệu chuẩn độ trễ xi lanh tại dây chuyền.

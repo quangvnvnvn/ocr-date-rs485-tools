@@ -30,6 +30,12 @@ QTextEdit { background:#ffffff; color:#203549; border:1px solid #dce5ed; border-
 QTabWidget::pane {border:1px solid #dce5ed; background:#f6f9fb;}
 QTabBar::tab {background:#edf3f7;color:#4d687b;padding:7px 11px;border:1px solid #dce5ed;}
 QTabBar::tab:selected {background:#dceef8;color:#124e70;font-weight:600;border-bottom:2px solid #268ab4;}
+QTabBar#modeBar::tab {background:#edf2fb;padding:10px 18px;border-radius:4px;}
+QTabBar#modeBar::tab:selected {background:#dce9ff;color:#174e91;border-bottom:3px solid #3979ce;}
+QPushButton#testHardware {background:#fff1d6;color:#925600;border-color:#e9bd68;}
+QPushButton#testHardware:hover {background:#ffe4ad;}
+QPushButton#saveSettings {background:#e0edff;color:#174e91;border-color:#8db5ed;}
+QLabel#productionState {background:#e2f3ea;color:#166744;border-radius:6px;padding:8px;font-weight:600;}
 QTableWidget {background:white;alternate-background-color:#f5f8fb;color:#203549;
  gridline-color:#e6edf2;border:1px solid #dce5ed;border-radius:6px;selection-background-color:#dcedf8;selection-color:#163e58;}
 QHeaderView::section {background:#e9f0f6;color:#36566d;padding:8px;border:0;border-bottom:1px solid #dce5ed;font-weight:600;}

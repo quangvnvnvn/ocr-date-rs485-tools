@@ -4,8 +4,13 @@ Giao diện mới chia thành **Chạy thật**, **Chạy thử**, **Test chức
 **Cài đặt**. Kết quả và ảnh kiểm tra dùng chung bên dưới; chuyển tab không tự ARM.
 Tab Chạy thật ưu tiên ảnh lớn và cho chọn NSX/AB/DM, khóa thông số khi ARM;
 thông số và nút kết nối camera nằm trong Cài đặt. Lịch sử ẩn ở tab Chạy thật.
+Chạy thật tự lưu kết quả vào `data/production/OCR_DATE_YYYY-MM-DD.xlsx`, theo
+ngày kiểm tra tại Việt Nam. Không lưu ảnh trong luồng sản xuất. XLSX cập nhật nền
+mỗi 5 giây và khi ngắt camera; nút **Mở Excel hôm nay** mở bảng hiện tại.
+Nhật ký phục hồi nội bộ giữ kết quả nếu Excel đang khóa file; đóng Excel rồi
+kết nối lại để xuất phần còn chờ. Trigger phần mềm/test không vào sổ sản xuất.
 
-**[Tải bản giao diện 4 tab (2026.10.29.3)](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/tag/ocr-date-v2026.10.29.3)**
+**[Tải bản giao diện 4 tab (2026.10.29.4)](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/tag/ocr-date-v2026.10.29.4)**
 
 **[Tải driver camera MVS 5.1.0](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.1/MVS_STD_5.1.0_260909.exe)** (~776 MB).
 Cài driver USB3/GigE phù hợp và Python SDK/Development trước khi dùng camera.
@@ -15,10 +20,10 @@ phía dưới và điều khiển ngõ DO RS485 để đẩy sản phẩm NG.
 
 ## Tải bản cài
 
-**[Bản phát hành OCR DATE 2026.10.29.3](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/tag/ocr-date-v2026.10.29.3)**
+**[Bản phát hành OCR DATE 2026.10.29.4](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/tag/ocr-date-v2026.10.29.4)**
 
-- [ZIP chứa bộ cài và hướng dẫn](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.3/OCR_DATE_BAN_CAI_DAT_Windows_64bit_2026-10-29.zip)
-- [Tải trực tiếp Setup EXE](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.3/OCR_DATE_Setup_2026-10-29.exe)
+- [ZIP chứa bộ cài và hướng dẫn](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.4/OCR_DATE_BAN_CAI_DAT_Windows_64bit_2026-10-29.zip)
+- [Tải trực tiếp Setup EXE](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.4/OCR_DATE_Setup_2026-10-29.exe)
 
 Giải nén ZIP, chạy `OCR_DATE_Setup_2026-10-29.exe`, chọn **Next → Install**.
 Bộ cài tạo lối tắt **OCR DATE - Hikrobot RS485** trên Desktop và có sẵn runtime,
@@ -36,7 +41,7 @@ cài đè giữ cấu hình đã lưu. Nút **TEST NG → XI LANH** phát xung D
 - Delay từ kết quả NG đến lệnh DO theo ms; thời gian xung và cấu hình COM/slave/DO.
 - Lưu cấu hình, báo cáo ảnh và lịch sử kiểm tra; kiểm tra lỗi trước khi trả PASS.
 
-Mục tiêu OCR là 100 ms từ khi nhận buffer ảnh đến kết quả. Đã qua 46 kiểm thử,
+Mục tiêu OCR là 100 ms từ khi nhận buffer ảnh đến kết quả. Đã qua 50 kiểm thử,
 thử cài/cập nhật/gỡ bộ cài và OCR mô phỏng 48,89 ms trên máy phát triển. Cần đo
 lại trên máy đích và hiệu chuẩn camera, trigger, RS485, xi lanh tại dây chuyền.
 
