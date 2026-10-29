@@ -10,6 +10,7 @@ date_ocr/packaging_cpu/
 date_ocr/packaging_onnx/
 date_ocr/release_build/
 date_ocr/release_build_lite/
+date_ocr/release_installer/
 date_ocr/portable_smoke_*/
 date_ocr/portable_lite_*/
 date_ocr/hybrid_smoke_*/
