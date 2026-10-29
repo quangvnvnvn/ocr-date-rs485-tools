@@ -308,7 +308,16 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName('subtitle');layout.addWidget(subtitle)
         self.controls=QWidget();self.controls.setObjectName('controls');top=QVBoxLayout(self.controls)
         top.setContentsMargins(12,10,12,10);top.setSpacing(8);layout.addWidget(self.controls)
-        camera_bar=QHBoxLayout();top.addLayout(camera_bar)
+        self.mode_tabs=QTabWidget();top.addWidget(self.mode_tabs)
+        pages=[]
+        for name in ('Chạy thật','Chạy thử','Test chức năng','Cài đặt'):
+            page=QWidget();page_layout=QVBoxLayout(page);page_layout.setSpacing(8)
+            self.mode_tabs.addTab(page,name);pages.append(page_layout)
+        production,trial,diagnostics,configuration=pages
+        production.addWidget(QLabel('Sản xuất · Camera Hikrobot nhận trigger ngoài, xử lý và đẩy NG theo cấu hình.'))
+        trial.addWidget(QLabel('Kiểm tra ảnh / thư mục · Không phát tín hiệu đẩy sản phẩm.'))
+        diagnostics.addWidget(QLabel('Kiểm tra camera, RS485 và xi lanh · TEST NG phát một xung DO thật khi bấm.'))
+        camera_bar=QHBoxLayout();production.addLayout(camera_bar)
         camera_bar.addWidget(QLabel('Nguồn ảnh:'))
         self.source_mode=QComboBox();self.source_mode.addItem('Ảnh tĩnh / thư mục','static')
         self.source_mode.addItem('Camera Hikrobot · trigger ngoài','hikrobot')
@@ -324,7 +333,7 @@ class MainWindow(QMainWindow):
         camera_bar.addWidget(self.disconnect_camera_button)
         self.camera_state=QLabel('ẢNH TĨNH');self.camera_state.setObjectName('cameraState');camera_bar.addWidget(self.camera_state)
         camera_bar.addStretch()
-        camera_test_bar=QHBoxLayout();top.addLayout(camera_test_bar)
+        camera_test_bar=QHBoxLayout();diagnostics.addLayout(camera_test_bar)
         self.camera_test_label=QLabel('Chỉnh / kiểm tra camera:');camera_test_bar.addWidget(self.camera_test_label)
         self.live_button=QPushButton('CAMERA LIVE');self.live_button.clicked.connect(self.toggle_live_view)
         self.live_button.setToolTip('Xem hình liên tục để chỉnh lens. Dừng LIVE sẽ tự khôi phục trigger ngoài.')
@@ -335,7 +344,7 @@ class MainWindow(QMainWindow):
         self.camera_test_hint=QLabel('LIVE chỉ dùng chỉnh lens · Sản xuất vẫn dùng Line0')
         self.camera_test_hint.setObjectName('subtitle');camera_test_bar.addWidget(self.camera_test_hint);camera_test_bar.addStretch()
         self.source_mode.currentIndexChanged.connect(self.source_changed)
-        eject_bar=QHBoxLayout();top.addLayout(eject_bar)
+        eject_bar=QHBoxLayout();configuration.addLayout(eject_bar)
         self.eject_enabled=QCheckBox('Bật đẩy sản phẩm NG qua RS485');eject_bar.addWidget(self.eject_enabled)
         eject_bar.addWidget(QLabel('COM:'));self.eject_port=QComboBox();self.eject_port.setEditable(True)
         self.eject_port.setMinimumWidth(90);eject_bar.addWidget(self.eject_port)
@@ -344,13 +353,13 @@ class MainWindow(QMainWindow):
         eject_bar.addWidget(QLabel('DO:'));self.eject_channel=QComboBox();self.eject_channel.addItems([str(n) for n in range(1,9)]);eject_bar.addWidget(self.eject_channel)
         eject_bar.addWidget(QLabel('Delay sau NG:'));self.eject_delay=QDoubleSpinBox();self.eject_delay.setRange(0,60000);self.eject_delay.setDecimals(0);self.eject_delay.setSuffix(' ms');self.eject_delay.setToolTip('Tính từ lúc có kết quả NG đến lúc gửi lệnh bật DO. Cần đo và hiệu chuẩn trên dây chuyền.');eject_bar.addWidget(self.eject_delay)
         eject_bar.addWidget(QLabel('Xung:'));self.eject_pulse=QDoubleSpinBox();self.eject_pulse.setRange(20,2000);self.eject_pulse.setDecimals(0);self.eject_pulse.setValue(100);self.eject_pulse.setSuffix(' ms');eject_bar.addWidget(self.eject_pulse)
-        eject_actions=QHBoxLayout();top.addLayout(eject_actions)
+        eject_actions=QHBoxLayout();diagnostics.addLayout(eject_actions)
         self.test_eject_link=QPushButton('Kiểm tra kết nối RS485');self.test_eject_link.clicked.connect(self.check_eject_link);eject_actions.addWidget(self.test_eject_link)
         self.test_eject_pulse=QPushButton('TEST NG → XI LANH');self.test_eject_pulse.clicked.connect(self.test_ng_eject)
         self.test_eject_pulse.setToolTip('Bật DO thật một lần sau delay đã cài. Chỉ chạy khi bấm nút này; không cần camera.')
         eject_actions.addWidget(self.test_eject_pulse)
         self.eject_state=QLabel('RS485 TẮT');eject_actions.addWidget(self.eject_state);eject_actions.addStretch()
-        bar=QHBoxLayout();top.addLayout(bar)
+        bar=QHBoxLayout();trial.addLayout(bar)
         def button(text,fn,parent=bar):
             b=QPushButton(text);b.clicked.connect(fn);parent.addWidget(b);return b
         self.open_button=button('1. Chọn ảnh',self.open_image)
@@ -358,10 +367,11 @@ class MainWindow(QMainWindow):
         self.sample_button=button('Thử 5 ảnh mẫu',self.samples)
         bar.addStretch()
         self.save_config_button=button('LƯU CẤU HÌNH',self.save_configuration)
+        bar.removeWidget(self.save_config_button);configuration.addWidget(self.save_config_button)
         self.save_config_button.setShortcut('Ctrl+S')
         self.save_config_button.setToolTip('Lưu toàn bộ thiết lập hiện tại để khôi phục khi mở lại (Ctrl+S).')
         self.run_button=button('KIỂM TRA OCR',self.run_image);self.run_button.setObjectName('primary')
-        settings=QHBoxLayout();top.addLayout(settings)
+        settings=QHBoxLayout();configuration.addLayout(settings)
         settings.addWidget(QLabel('Mã AB cần kiểm tra:'));self.ab=QLineEdit('12');self.ab.setMaximumWidth(65);self.ab.setMaxLength(2)
         self.ab.setValidator(QRegularExpressionValidator(QRegularExpression('[0-9]{2}')));settings.addWidget(self.ab)
         settings.addWidget(QLabel('DM:'));self.dm=QComboBox();self.dm.addItems(['1','2','3']);settings.addWidget(self.dm)
@@ -377,11 +387,17 @@ class MainWindow(QMainWindow):
         self.max_angle.setToolTip('Độ lệch cho phép giữa hướng chữ DATE và mép dải ngang tối phía dưới.')
         settings.insertWidget(settings.count()-1,self.max_angle)
         self.roi_mode.currentIndexChanged.connect(self.roi_mode_changed)
-        roi_bar=QHBoxLayout();top.addLayout(roi_bar)
+        roi_bar=QHBoxLayout();configuration.addLayout(roi_bar)
         self.select_roi_button=button('2. Khoanh vùng DATE',self.select_roi,roi_bar)
         self.save_roi_button=button('Lưu vùng',self.save_roi,roi_bar)
         self.reset_roi_button=button('Xóa vùng',self.reset_roi,roi_bar)
         self.coords=QLabel('');roi_bar.addWidget(self.coords);roi_bar.addStretch()
+        test_arm=QPushButton('Kết nối camera để test');test_arm.clicked.connect(self.arm_test_camera);diagnostics.addWidget(test_arm)
+        simulator=QPushButton('Bật mô phỏng trigger bằng ảnh');simulator.clicked.connect(self.arm_simulator);trial.addWidget(simulator)
+        simulated_trigger=QPushButton('Phát trigger mô phỏng');simulated_trigger.clicked.connect(self.simulate_trigger);trial.addWidget(simulated_trigger)
+        for page_layout in (trial,diagnostics):
+            disconnect=QPushButton('Ngắt camera / dừng mô phỏng');disconnect.clicked.connect(self.disconnect_camera);page_layout.addWidget(disconnect)
+        camera_bar.itemAt(0).widget().hide();self.source_mode.hide()
         self.path_label=QLabel('Chọn ảnh để bắt đầu');self.path_label.setObjectName('fileLabel');layout.addWidget(self.path_label)
         split=QSplitter(Qt.Horizontal);layout.addWidget(split,1)
         left=QWidget();left.setObjectName('imagePanel');ll=QVBoxLayout(left)
@@ -416,6 +432,20 @@ class MainWindow(QMainWindow):
         self.load_path(startup)
         self.roi_mode_changed()
         self.source_changed()
+        self.mode_tabs.setCurrentIndex(int(self.config.get('operator_tab',0 if self.source_mode.currentData()=='hikrobot' else 1)) % 4)
+        self.mode_tabs.currentChanged.connect(self.operator_tab_changed)
+    def operator_tab_changed(self,index):
+        if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
+        if index in (0,1):
+            self.source_mode.setCurrentIndex(self.source_mode.findData('hikrobot' if index==0 else 'static'))
+    def arm_test_camera(self):
+        if self.camera_worker.isRunning() or self.live_worker.isRunning():return
+        self.source_mode.setCurrentIndex(self.source_mode.findData('hikrobot'));self.connect_camera(diagnostic=True)
+    def arm_simulator(self):
+        if self.camera_worker.isRunning() or self.live_worker.isRunning():return
+        if self.eject_enabled.isChecked():
+            return QMessageBox.information(self,'Mô phỏng','Tắt đẩy NG tự động trong Cài đặt trước khi mô phỏng.')
+        self.source_mode.setCurrentIndex(self.source_mode.findData('simulation'));self.connect_camera()
     def load_operator_settings(self):
         settings=self.config.get('inspection',{})
         ab=str(settings.get('expected_ab','12'))
@@ -449,6 +479,7 @@ class MainWindow(QMainWindow):
         self.eject_delay.setValue(float(eject.get('decision_delay_ms',0)))
         self.eject_pulse.setValue(float(eject.get('pulse_ms',100)))
     def save_operator_settings(self):
+        self.config['operator_tab']=self.mode_tabs.currentIndex()
         self.config['roi_mode']=self.roi_mode.currentData()
         self.config['inspection']={'expected_ab':self.ab.text(),'expected_dm':int(self.dm.currentText()),
             'minimum_confidence':self.threshold.value(),'check_nsx_date':True,
@@ -565,7 +596,7 @@ class MainWindow(QMainWindow):
         self.history.setEnabled(False);self.stop.setEnabled(True);self.rows=[];self.history.setRowCount(0)
         self.worker.jobs=jobs;self.worker.expected=expected
         self.worker.start(QThread.Priority.HighPriority)
-    def connect_camera(self):
+    def connect_camera(self,diagnostic=False):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
         mode=self.source_mode.currentData()
         if mode not in ('hikrobot','simulation'):
@@ -574,6 +605,9 @@ class MainWindow(QMainWindow):
         except ValueError as exc:return QMessageBox.warning(self,'Kiểm tra thiết lập',str(exc))
         try:
             eject=self.current_eject_settings()
+            if diagnostic:
+                from dataclasses import replace
+                eject=replace(eject,enabled=False)
             if eject.enabled:
                 if mode!='hikrobot':raise EjectorError('Chỉ bật đẩy với camera Hikrobot trigger ngoài')
                 eject.validate()

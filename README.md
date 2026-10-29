@@ -1,14 +1,22 @@
 # OCR DATE — Hikrobot và RS485
 
+Giao diện mới chia thành **Chạy thật**, **Chạy thử**, **Test chức năng** và
+**Cài đặt**. Kết quả và ảnh kiểm tra dùng chung bên dưới; chuyển tab không tự ARM.
+
+**[Tải bản giao diện 4 tab (2026.10.29.2)](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/tag/ocr-date-v2026.10.29.2)**
+
+**[Tải driver camera MVS 5.1.0](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.1/MVS_STD_5.1.0_260909.exe)** (~776 MB).
+Cài driver USB3/GigE phù hợp và Python SDK/Development trước khi dùng camera.
+
 Ứng dụng Windows kiểm tra ngày sản xuất trên bao bì, so sánh góc DATE với dải tối
 phía dưới và điều khiển ngõ DO RS485 để đẩy sản phẩm NG.
 
 ## Tải bản cài
 
-**[Bản phát hành OCR DATE 2026.10.29.1](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/tag/ocr-date-v2026.10.29.1)**
+**[Bản phát hành OCR DATE 2026.10.29.2](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/tag/ocr-date-v2026.10.29.2)**
 
-- [ZIP chứa bộ cài và hướng dẫn](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.1/OCR_DATE_BAN_CAI_DAT_Windows_64bit_2026-10-29.zip)
-- [Tải trực tiếp Setup EXE](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.1/OCR_DATE_Setup_2026-10-29.exe)
+- [ZIP chứa bộ cài và hướng dẫn](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.2/OCR_DATE_BAN_CAI_DAT_Windows_64bit_2026-10-29.zip)
+- [Tải trực tiếp Setup EXE](https://github.com/quangvnvnvn/ocr-date-rs485-tools/releases/download/ocr-date-v2026.10.29.2/OCR_DATE_Setup_2026-10-29.exe)
 
 Giải nén ZIP, chạy `OCR_DATE_Setup_2026-10-29.exe`, chọn **Next → Install**.
 Bộ cài tạo lối tắt **OCR DATE - Hikrobot RS485** trên Desktop và có sẵn runtime,

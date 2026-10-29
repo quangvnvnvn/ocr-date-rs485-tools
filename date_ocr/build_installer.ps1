@@ -16,6 +16,7 @@ New-Item -ItemType Directory -Path $delivery -Force | Out-Null
 $config = Get-Content -LiteralPath (Join-Path $payload 'config\config.json') -Raw | ConvertFrom-Json
 $config.PSObject.Properties.Remove('last_image')
 $config.hardware.source_mode = 'static'
+$config | Add-Member -NotePropertyName operator_tab -NotePropertyValue 1 -Force
 $config.hardware.serial_number = ''
 $config.ejector.enabled = $false
 $config.ejector.port = ''

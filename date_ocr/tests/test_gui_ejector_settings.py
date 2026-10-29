@@ -48,6 +48,14 @@ class EjectorSettingsGUITests(unittest.TestCase):
             os.environ['OCR_DATE_CONFIG'] = str(config_path)
             try:
                 first = MainWindow()
+                self.assertEqual([first.mode_tabs.tabText(i) for i in range(4)],
+                                 ['Chạy thật','Chạy thử','Test chức năng','Cài đặt'])
+                first.mode_tabs.setCurrentIndex(0)
+                self.assertEqual(first.source_mode.currentData(),'hikrobot')
+                self.assertFalse(first.camera_worker.isRunning())
+                first.mode_tabs.setCurrentIndex(1)
+                self.assertEqual(first.source_mode.currentData(),'static')
+                first.mode_tabs.setCurrentIndex(3)
                 first.eject_port.setCurrentText('COM9')
                 first.eject_channel.setCurrentText('2')
                 first.eject_delay.setValue(525)
@@ -56,6 +64,7 @@ class EjectorSettingsGUITests(unittest.TestCase):
                 first.close()
 
                 second = MainWindow()
+                self.assertEqual(second.mode_tabs.currentIndex(),3)
                 self.assertEqual(second.eject_port.currentText(), 'COM9')
                 self.assertEqual(second.eject_channel.currentText(), '2')
                 self.assertEqual(second.eject_delay.value(), 525)
