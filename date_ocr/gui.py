@@ -10,7 +10,7 @@ from PySide6.QtCore import QRegularExpression
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,
     QPushButton,QLabel,QLineEdit,QComboBox,QDoubleSpinBox,QCheckBox,QDateEdit,
     QFileDialog,QMessageBox,QSplitter,QTabWidget,QTextEdit,QTableWidget,QTableWidgetItem,
-    QHeaderView,QGroupBox)
+    QHeaderView,QGroupBox,QSizePolicy)
 from main import load_image, save_image, write_json, save_report, ROOT, EXTENSIONS
 from roi.fixed_roi import FixedROI
 from roi.auto_roi import AutoROIDetector
@@ -317,7 +317,7 @@ class MainWindow(QMainWindow):
         production.addWidget(QLabel('Sản xuất · Camera Hikrobot nhận trigger ngoài, xử lý và đẩy NG theo cấu hình.'))
         trial.addWidget(QLabel('Kiểm tra ảnh / thư mục · Không phát tín hiệu đẩy sản phẩm.'))
         diagnostics.addWidget(QLabel('Kiểm tra camera, RS485 và xi lanh · TEST NG phát một xung DO thật khi bấm.'))
-        camera_bar=QHBoxLayout();production.addLayout(camera_bar)
+        camera_bar=QHBoxLayout();configuration.addLayout(camera_bar)
         camera_bar.addWidget(QLabel('Nguồn ảnh:'))
         self.source_mode=QComboBox();self.source_mode.addItem('Ảnh tĩnh / thư mục','static')
         self.source_mode.addItem('Camera Hikrobot · trigger ngoài','hikrobot')
@@ -386,6 +386,17 @@ class MainWindow(QMainWindow):
         self.max_angle=QDoubleSpinBox();self.max_angle.setRange(.1,15);self.max_angle.setDecimals(1);self.max_angle.setSingleStep(.1);self.max_angle.setValue(3.0);self.max_angle.setSuffix('°')
         self.max_angle.setToolTip('Độ lệch cho phép giữa hướng chữ DATE và mép dải ngang tối phía dưới.')
         settings.insertWidget(settings.count()-1,self.max_angle)
+        production_settings=QHBoxLayout();production.addLayout(production_settings)
+        for i in range(settings.count()-1,-1,-1):
+            widget=settings.itemAt(i).widget()
+            if widget in (self.ab,self.dm,self.date,self.nsx_label) or (isinstance(widget,QLabel) and widget.text() in ('Mã AB cần kiểm tra:','DM:')):
+                settings.removeWidget(widget)
+                if isinstance(widget,QLabel):widget.deleteLater()
+        for label,widget in (('Ngày NSX đang kiểm tra:',self.date),('Mã AB:',self.ab),('DM:',self.dm)):
+            production_settings.addWidget(QLabel(label));production_settings.addWidget(widget)
+        production_settings.addStretch()
+        production_save=QPushButton('Lưu thông số kiểm tra');production_save.clicked.connect(self.save_configuration);production_settings.addWidget(production_save)
+        self.production_state=QLabel('Camera chưa ARM · Kết nối tại tab Cài đặt');production.addWidget(self.production_state)
         self.roi_mode.currentIndexChanged.connect(self.roi_mode_changed)
         roi_bar=QHBoxLayout();configuration.addLayout(roi_bar)
         self.select_roi_button=button('2. Khoanh vùng DATE',self.select_roi,roi_bar)
@@ -399,7 +410,7 @@ class MainWindow(QMainWindow):
             disconnect=QPushButton('Ngắt camera / dừng mô phỏng');disconnect.clicked.connect(self.disconnect_camera);page_layout.addWidget(disconnect)
         camera_bar.itemAt(0).widget().hide();self.source_mode.hide()
         self.path_label=QLabel('Chọn ảnh để bắt đầu');self.path_label.setObjectName('fileLabel');layout.addWidget(self.path_label)
-        split=QSplitter(Qt.Horizontal);layout.addWidget(split,1)
+        split=QSplitter(Qt.Horizontal);self.image_split=split;layout.addWidget(split,1)
         left=QWidget();left.setObjectName('imagePanel');ll=QVBoxLayout(left)
         image_label=QLabel('ẢNH SẢN PHẨM  ·  Khung xanh là vùng kiểm tra');image_label.setObjectName('sectionLabel');ll.addWidget(image_label)
         self.original=ImageView();self.original.selected.connect(self.roi_selected);ll.addWidget(self.original,1);split.addWidget(left)
@@ -434,7 +445,20 @@ class MainWindow(QMainWindow):
         self.source_changed()
         self.mode_tabs.setCurrentIndex(int(self.config.get('operator_tab',0 if self.source_mode.currentData()=='hikrobot' else 1)) % 4)
         self.mode_tabs.currentChanged.connect(self.operator_tab_changed)
+        self.operator_tab_changed(self.mode_tabs.currentIndex())
+    def update_operator_layout(self,index):
+        for i in range(self.mode_tabs.count()):
+            self.mode_tabs.widget(i).setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Preferred if i==index else QSizePolicy.Ignored)
+        self.mode_tabs.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Maximum)
+        self.mode_tabs.setFixedHeight(self.mode_tabs.widget(index).layout().sizeHint().height()+self.mode_tabs.tabBar().sizeHint().height()+12)
+        self.history.setVisible(index!=0)
+        self.image_split.setSizes([850,350] if index==0 else [580,620])
+        self.mode_tabs.updateGeometry()
+    def lock_inspection_settings(self,locked):
+        for widget in (self.date,self.ab,self.dm,self.threshold,self.max_angle,self.roi_mode):
+            widget.setEnabled(not locked)
     def operator_tab_changed(self,index):
+        self.update_operator_layout(index)
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
         if index in (0,1):
             self.source_mode.setCurrentIndex(self.source_mode.findData('hikrobot' if index==0 else 'static'))
@@ -634,6 +658,7 @@ class MainWindow(QMainWindow):
                         self.test_eject_pulse):
             control.setEnabled(False)
         self.camera_worker.start(QThread.Priority.TimeCriticalPriority)
+        self.lock_inspection_settings(True)
     def toggle_live_view(self):
         if self.eject_test_worker.isRunning():return
         if self.live_worker.isRunning():
@@ -705,6 +730,7 @@ class MainWindow(QMainWindow):
     def camera_armed(self,info):
         ready=bool(info.get('ready'))
         if ready:
+            self.production_state.setText(f'ĐÃ ARM · NSX {self.date.date().toString("dd/MM/yyyy")} · AB {self.ab.text()} · DM {self.dm.currentText()}')
             self.camera_state.setText('ĐÃ ARM • CHỜ TRIGGER')
             self.camera_state.setStyleSheet('font-weight:800;color:#087448')
             self.disconnect_camera_button.setEnabled(True)
@@ -712,6 +738,7 @@ class MainWindow(QMainWindow):
             self.banner.setText('SẴN SÀNG  ·  CHỜ TRIGGER NGOÀI')
             self.banner.setStyleSheet('font-size:22px;font-weight:bold;padding:10px;background:#d7f3e4;color:#11663f')
         else:
+            self.production_state.setText('Camera đã ngắt · Kết nối tại tab Cài đặt')
             self.camera_state.setText('ĐÃ NGẮT')
             self.camera_state.setStyleSheet('font-weight:700;color:#596b7a')
     def camera_failed(self,text):
@@ -720,6 +747,7 @@ class MainWindow(QMainWindow):
         self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:#ffe0df;color:#a72525')
         self.details.setPlainText(text);self.show_status(last)
     def camera_finished(self):
+        self.lock_inspection_settings(False)
         self.source_mode.setEnabled(True);self.camera_source=None
         for control in (self.eject_enabled,self.eject_port,self.refresh_ports,self.eject_slave,
                         self.eject_channel,self.eject_delay,self.eject_pulse,self.test_eject_link,

@@ -1,4 +1,4 @@
-﻿#ifndef PayloadDir
+#ifndef PayloadDir
   #error PayloadDir must point to the tested portable payload
 #endif
 #ifndef InitialConfig
@@ -8,8 +8,8 @@
 [Setup]
 AppId={{3C38704D-89B2-44FB-ABA1-0AF396C43EB8}
 AppName=OCR DATE - Hikrobot RS485
-AppVersion=2026.10.29.2
-AppVerName=OCR DATE - Hikrobot RS485 2026.10.29.2
+AppVersion=2026.10.29.3
+AppVerName=OCR DATE - Hikrobot RS485 2026.10.29.3
 AppPublisher=OCR DATE
 DefaultDirName={code:DefaultInstallDirectory}
 DefaultGroupName=OCR DATE - Hikrobot RS485

@@ -10,6 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QDate
 from gui import EjectTestWorker, MainWindow
 from hardware.rs485_ejector import EjectorSettings, ModbusOutput
 from test_rs485_ejector import FakeSerial
@@ -53,6 +54,13 @@ class EjectorSettingsGUITests(unittest.TestCase):
                 first.mode_tabs.setCurrentIndex(0)
                 self.assertEqual(first.source_mode.currentData(),'hikrobot')
                 self.assertFalse(first.camera_worker.isRunning())
+                self.assertTrue(first.mode_tabs.widget(0).isAncestorOf(first.date))
+                self.assertTrue(first.mode_tabs.widget(3).isAncestorOf(first.connect_camera_button))
+                self.assertTrue(first.history.isHidden())
+                first.date.setDate(QDate(2026,9,24))
+                first.lock_inspection_settings(True)
+                self.assertFalse(first.date.isEnabled())
+                first.lock_inspection_settings(False)
                 first.mode_tabs.setCurrentIndex(1)
                 self.assertEqual(first.source_mode.currentData(),'static')
                 first.mode_tabs.setCurrentIndex(3)
@@ -65,6 +73,7 @@ class EjectorSettingsGUITests(unittest.TestCase):
 
                 second = MainWindow()
                 self.assertEqual(second.mode_tabs.currentIndex(),3)
+                self.assertEqual(second.date.date(),QDate(2026,9,24))
                 self.assertEqual(second.eject_port.currentText(), 'COM9')
                 self.assertEqual(second.eject_channel.currentText(), '2')
                 self.assertEqual(second.eject_delay.value(), 525)
