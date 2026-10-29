@@ -1,5 +1,5 @@
 ﻿OCR DATE - BẢN CÀI ĐẶT WINDOWS 64-BIT
-Phiên bản: 2026.10.29.4
+Phiên bản: 2026.10.29.5
 
 1. Giải nén ZIP, chạy OCR_DATE_Setup_2026-10-29.exe.
 2. Bấm Next, chọn thư mục cài đặt rồi bấm Install.

@@ -36,6 +36,16 @@ QPushButton#testHardware {background:#fff1d6;color:#925600;border-color:#e9bd68;
 QPushButton#testHardware:hover {background:#ffe4ad;}
 QPushButton#saveSettings {background:#e0edff;color:#174e91;border-color:#8db5ed;}
 QLabel#productionState {background:#e2f3ea;color:#166744;border-radius:6px;padding:8px;font-weight:600;}
+QWidget#productionPage {background:#f1f9f5;}
+QWidget#trialPage {background:#eef6ff;}
+QWidget#diagnosticsPage {background:#fff8eb;}
+QWidget#settingsPage {background:#f5f2fc;}
+QWidget#cameraBlock, QWidget#inspectionBlock {background:#dfedff;border:1px solid #a9c9ef;border-radius:7px;}
+QWidget#rs485Block {background:#fff0d2;border:1px solid #e4bd73;border-radius:7px;}
+QWidget#ocrBlock {background:#eae3fa;border:1px solid #c4afea;border-radius:7px;}
+QWidget#roiBlock {background:#dff3eb;border:1px solid #9bcfba;border-radius:7px;}
+QWidget#imagePanel {background:#edf5ff;border:1px solid #b5cee9;}
+QWidget#resultPanel {background:#f0f8f3;border:1px solid #b6d6c2;}
 QTableWidget {background:white;alternate-background-color:#f5f8fb;color:#203549;
  gridline-color:#e6edf2;border:1px solid #dce5ed;border-radius:6px;selection-background-color:#dcedf8;selection-color:#163e58;}
 QHeaderView::section {background:#e9f0f6;color:#36566d;padding:8px;border:0;border-bottom:1px solid #dce5ed;font-weight:600;}
