@@ -94,6 +94,33 @@ Camera Hikrobot thật đã kết nối qua MVS, chụp và replay 45 frame. Ph�
 cần nghiệm thu tại dây chuyền là tín hiệu điện trigger, chu kỳ liên tục, lens/đèn,
 exposure và thời gian trên đúng máy Core i5 Gen 8.
 
+## Đẩy sản phẩm NG qua RS485
+
+Giao diện có **Bật đẩy sản phẩm NG qua RS485**, cổng COM, địa chỉ slave, DO1–DO8,
+**Delay sau NG (ms)** và **Xung (ms)**. Delay bắt đầu đúng lúc phần mềm có quyết
+định OK/NG, trước khi gửi lệnh bật DO. Chỉ kết quả NG của frame do trigger cứng
+tạo ra mới được lập lịch đẩy; nút trigger phần mềm để test không bật DO. Các giá
+trị lưu trong `config/config.json` và được khôi phục khi mở lại.
+
+Module mục tiêu là Waveshare Industrial 8-Ch Modbus RTU GPIO Extender, mặc định
+9600 N8 1. DO1–DO8 dùng coil 0x0000–0x0007, lệnh Modbus 05, đọc lại bằng 01.
+Ứng dụng kiểm tra kênh ở Normal mode, xác nhận DO OFF trước khi ARM camera,
+kiểm tra phản hồi/CRC và đọc lại DO sau mỗi lần bật/tắt. Nếu lỗi giao tiếp hoặc
+hai NG quá gần khiến xung chồng nhau, luồng camera dừng và cần xử lý lỗi trước
+khi chạy tiếp. Nút **Kiểm tra kết nối RS485** chỉ gửi OFF và đọc lại, không bật DO.
+Nút **TEST NG → XI LANH** giả lập một kết quả NG khi được bấm: chờ đúng
+**Delay sau NG** rồi phát một xung DO thật theo thời gian **Xung**. Nút này dùng
+để thử COM, DO, van và xi lanh khi không chạy camera; có thể bấm khi chế độ đẩy
+tự động đang tắt. Không bấm nếu vùng đẩy chưa được chuẩn bị an toàn.
+
+DO là ngõ open drain, tối đa 500 mA mỗi kênh theo tài liệu module. Đấu ngõ này
+qua mạch/van điện từ phù hợp với nguồn ngoài và bảo vệ tải cảm; không nối thẳng
+xi lanh khí vào DO. Chưa có số đo thời gian từ vị trí chụp tới vị trí đẩy nên
+bản mặc định tắt chức năng đẩy và đặt delay bằng 0. Cần đo vận tốc băng tải,
+khoảng cách, độ trễ xử lý/truyền RS485 và độ trễ van/xi lanh để hiệu chuẩn delay;
+chỉ ARM đẩy khi delay nằm trong 1–60000 ms. `eject_events.jsonl` trong thư mục
+debug camera ghi các lần ON/OFF hoặc lỗi. Chưa xác nhận I/O thực tế với module.
+
 ## Chọn và lưu ROI trên ảnh mới
 
 ```powershell

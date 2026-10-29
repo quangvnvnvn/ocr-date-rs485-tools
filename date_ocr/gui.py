@@ -1,5 +1,5 @@
 """Vietnamese GUI for still images and hardware-triggered HIKROBOT frames."""
-import sys, json, traceback, html, time, gc, os
+import sys, json, traceback, html, time, gc, os, threading
 from pathlib import Path
 from datetime import datetime
 import uuid
@@ -19,6 +19,7 @@ from inspection_runtime import InspectionRuntime
 from hardware.frame_source import FrameSourceError,missing_frame_count
 from hardware.simulated_source import TriggeredImageSource
 from hardware.hikrobot_mvs import HikrobotMvsSource
+from hardware.rs485_ejector import EjectorSettings, ModbusOutput, TimedEjector, EjectorError
 from gui_theme import apply_theme
 
 
@@ -118,13 +119,22 @@ class CameraWorker(QThread):
     status=Signal(str)
     error=Signal(str)
     armed=Signal(object)
+    eject_event=Signal(object)
     def __init__(self,runtime=None):
         super().__init__();self.runtime=runtime or InspectionRuntime();self.source=None
         self.expected=None;self.roi=None;self.roi_mode='auto';self.timeout_ms=100;self.output=None
+        self.eject_settings=None;self.ejector=None
     def run(self):
         records=[]
         try:
             self.runtime.prepare(self.roi_mode=='auto',self.status.emit)
+            if self.eject_settings is not None and self.eject_settings.enabled:
+                if not isinstance(self.source,HikrobotMvsSource):
+                    raise EjectorError('Chỉ cho phép đẩy thật với camera Hikrobot trigger ngoài')
+                self.ejector=TimedEjector(ModbusOutput(self.eject_settings),
+                    lambda phase,frame_id,detail,when:self.eject_event.emit(dict(
+                        phase=phase,frame_id=frame_id,detail=detail,monotonic=when)))
+                self.ejector.start()
             self.status.emit('Đang mở camera và bật trigger cứng…')
             self.source.open();self.source.start()
             self.output=ROOT/'data/debug'/('camera_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6])
@@ -160,6 +170,14 @@ class CameraWorker(QThread):
                     report['validation'].update(result='FAIL_FRAME_GAP',
                         error_reason=(f'Mất {missing} frame trigger trước frame #{packet.frame_id}. '
                                       f'{previous}').strip())
+                decision_monotonic=time.perf_counter()
+                # Diagnostic software triggers never actuate the pneumatic valve.
+                if self.ejector is not None and metadata.get('trigger_mode')=='hardware' and report['validation']['result']!='PASS':
+                    due=self.ejector.schedule(packet.frame_id,decision_monotonic,
+                                              report['validation']['result'])
+                    report['ejector']=dict(status='SCHEDULED',frame_id=packet.frame_id,
+                        decision_monotonic=decision_monotonic,due_monotonic=due,
+                        decision_delay_ms=self.eject_settings.decision_delay_ms)
                 records.append(report)
                 # The operator sees the decision before diagnostic files are written.
                 self.result.emit(report,folder,artifacts)
@@ -170,12 +188,45 @@ class CameraWorker(QThread):
         except Exception:
             self.error.emit(traceback.format_exc())
         finally:
+            if self.ejector is not None:
+                try:self.ejector.stop()
+                except Exception as exc:self.error.emit(f'Không tắt được DO RS485: {exc}')
+                self.ejector=None
             if self.source is not None:
                 try:self.source.stop()
                 except Exception:pass
                 try:self.source.close()
                 except Exception:pass
             self.armed.emit({'ready':False})
+
+
+class EjectTestWorker(QThread):
+    """One explicit operator test pulse, using the same Modbus scheduler as production."""
+    event=Signal(object)
+    error=Signal(str)
+    def __init__(self):
+        super().__init__();self.settings=None
+    def run(self):
+        completed=threading.Event()
+        def callback(phase,frame_id,detail,when):
+            self.event.emit(dict(phase=phase,frame_id=frame_id,detail=detail,
+                                 monotonic=when,test=True))
+            if phase in ('OFF','ERROR'):completed.set()
+        ejector=None
+        try:
+            ejector=TimedEjector(ModbusOutput(self.settings),callback)
+            ejector.start()
+            decision=time.perf_counter()
+            due=ejector.schedule(-1,decision,'FAIL_TEST')
+            self.event.emit(dict(phase='SCHEDULED',frame_id=-1,detail='NG giả lập',
+                                 monotonic=decision,due_monotonic=due,test=True))
+            while not completed.wait(.05):
+                if self.isInterruptionRequested():break
+        except Exception as exc:self.error.emit(str(exc))
+        finally:
+            if ejector is not None:
+                try:ejector.stop()
+                except Exception as exc:self.error.emit('Không tắt được DO sau test: '+str(exc))
 
 
 class LiveViewWorker(QThread):
@@ -238,6 +289,11 @@ class MainWindow(QMainWindow):
         self.camera_worker.status.connect(self.show_status)
         self.camera_worker.error.connect(self.camera_failed)
         self.camera_worker.armed.connect(self.camera_armed)
+        self.camera_worker.eject_event.connect(self.on_eject_event)
+        self.eject_test_worker=EjectTestWorker()
+        self.eject_test_worker.event.connect(self.on_eject_event)
+        self.eject_test_worker.error.connect(self.eject_test_failed)
+        self.eject_test_worker.finished.connect(self.eject_test_finished)
         self.camera_worker.finished.connect(self.camera_finished)
         self.live_worker=LiveViewWorker()
         self.live_worker.frame.connect(self.got_live_frame)
@@ -279,6 +335,21 @@ class MainWindow(QMainWindow):
         self.camera_test_hint=QLabel('LIVE chỉ dùng chỉnh lens · Sản xuất vẫn dùng Line0')
         self.camera_test_hint.setObjectName('subtitle');camera_test_bar.addWidget(self.camera_test_hint);camera_test_bar.addStretch()
         self.source_mode.currentIndexChanged.connect(self.source_changed)
+        eject_bar=QHBoxLayout();top.addLayout(eject_bar)
+        self.eject_enabled=QCheckBox('Bật đẩy sản phẩm NG qua RS485');eject_bar.addWidget(self.eject_enabled)
+        eject_bar.addWidget(QLabel('COM:'));self.eject_port=QComboBox();self.eject_port.setEditable(True)
+        self.eject_port.setMinimumWidth(90);eject_bar.addWidget(self.eject_port)
+        self.refresh_ports=QPushButton('Quét COM');self.refresh_ports.clicked.connect(self.refresh_eject_ports);eject_bar.addWidget(self.refresh_ports)
+        eject_bar.addWidget(QLabel('Slave:'));self.eject_slave=QComboBox();self.eject_slave.setEditable(True);self.eject_slave.setCurrentText('1');self.eject_slave.setMaximumWidth(55);eject_bar.addWidget(self.eject_slave)
+        eject_bar.addWidget(QLabel('DO:'));self.eject_channel=QComboBox();self.eject_channel.addItems([str(n) for n in range(1,9)]);eject_bar.addWidget(self.eject_channel)
+        eject_bar.addWidget(QLabel('Delay sau NG:'));self.eject_delay=QDoubleSpinBox();self.eject_delay.setRange(0,60000);self.eject_delay.setDecimals(0);self.eject_delay.setSuffix(' ms');self.eject_delay.setToolTip('Tính từ lúc có kết quả NG đến lúc gửi lệnh bật DO. Cần đo và hiệu chuẩn trên dây chuyền.');eject_bar.addWidget(self.eject_delay)
+        eject_bar.addWidget(QLabel('Xung:'));self.eject_pulse=QDoubleSpinBox();self.eject_pulse.setRange(20,2000);self.eject_pulse.setDecimals(0);self.eject_pulse.setValue(100);self.eject_pulse.setSuffix(' ms');eject_bar.addWidget(self.eject_pulse)
+        eject_actions=QHBoxLayout();top.addLayout(eject_actions)
+        self.test_eject_link=QPushButton('Kiểm tra kết nối RS485');self.test_eject_link.clicked.connect(self.check_eject_link);eject_actions.addWidget(self.test_eject_link)
+        self.test_eject_pulse=QPushButton('TEST NG → XI LANH');self.test_eject_pulse.clicked.connect(self.test_ng_eject)
+        self.test_eject_pulse.setToolTip('Bật DO thật một lần sau delay đã cài. Chỉ chạy khi bấm nút này; không cần camera.')
+        eject_actions.addWidget(self.test_eject_pulse)
+        self.eject_state=QLabel('RS485 TẮT');eject_actions.addWidget(self.eject_state);eject_actions.addStretch()
         bar=QHBoxLayout();top.addLayout(bar)
         def button(text,fn,parent=bar):
             b=QPushButton(text);b.clicked.connect(fn);parent.addWidget(b);return b
@@ -370,6 +441,13 @@ class MainWindow(QMainWindow):
         self.camera_serial.setText(str(hardware.get('serial_number','')))
         line=self.trigger_line.findText(str(hardware.get('trigger_source','Line0')))
         self.trigger_line.setCurrentIndex(line if line>=0 else 0)
+        eject=self.config.get('ejector',{})
+        self.eject_enabled.setChecked(bool(eject.get('enabled',False)))
+        self.eject_port.setCurrentText(str(eject.get('port','')))
+        self.eject_slave.setCurrentText(str(eject.get('slave',1)))
+        self.eject_channel.setCurrentText(str(eject.get('channel',1)))
+        self.eject_delay.setValue(float(eject.get('decision_delay_ms',0)))
+        self.eject_pulse.setValue(float(eject.get('pulse_ms',100)))
     def save_operator_settings(self):
         self.config['roi_mode']=self.roi_mode.currentData()
         self.config['inspection']={'expected_ab':self.ab.text(),'expected_dm':int(self.dm.currentText()),
@@ -380,6 +458,11 @@ class MainWindow(QMainWindow):
             'provider':'hikrobot_mvs','serial_number':self.camera_serial.text().strip(),
             'trigger_mode':'hardware','trigger_source':self.trigger_line.currentText(),
             'frame_timeout_ms':100,'external_trigger_only':True}
+        self.config['ejector']={'enabled':self.eject_enabled.isChecked(),
+            'port':self.eject_port.currentText().strip(),'baudrate':9600,
+            'slave':int(self.eject_slave.currentText()) if self.eject_slave.currentText().isdigit() else 1,
+            'channel':int(self.eject_channel.currentText()),
+            'decision_delay_ms':int(self.eject_delay.value()),'pulse_ms':int(self.eject_pulse.value())}
         if self.path and self.path.is_file():self.config['last_image']=str(self.path.resolve())
         write_json(self.config_path,self.config)
     def save_configuration(self):
@@ -389,6 +472,10 @@ class MainWindow(QMainWindow):
                 maximum_angle_deviation=self.max_angle.value())
         except ValueError as exc:
             self.show_status('Không thể lưu: '+str(exc));return
+        if self.eject_enabled.isChecked():
+            try:self.current_eject_settings().validate()
+            except (ValueError,EjectorError) as exc:
+                self.show_status('Không thể lưu bộ đẩy: '+str(exc));return
         if self.roi_mode.currentData()=='fixed':
             self.config['fixed_roi']=self.roi.to_dict() if self.roi else None
         self.save_operator_settings()
@@ -397,7 +484,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1800,lambda:self.save_config_button.setText('LƯU CẤU HÌNH'))
     def source_changed(self):
         mode=self.source_mode.currentData();camera_running=self.camera_worker.isRunning();live_running=self.live_worker.isRunning()
-        running=camera_running or live_running
+        test_running=self.eject_test_worker.isRunning()
+        running=camera_running or live_running or test_running
         hardware=mode in ('hikrobot','simulation')
         self.camera_serial.setEnabled(mode=='hikrobot' and not running)
         self.trigger_line.setEnabled(mode=='hikrobot' and not running)
@@ -405,7 +493,7 @@ class MainWindow(QMainWindow):
         self.disconnect_camera_button.setEnabled(camera_running)
         self.live_button.setVisible(mode=='hikrobot')
         self.live_button.setText('DỪNG LIVE' if live_running else 'CAMERA LIVE')
-        self.live_button.setEnabled(mode=='hikrobot' and not camera_running)
+        self.live_button.setEnabled(mode=='hikrobot' and not camera_running and not test_running)
         self.test_trigger_button.setVisible(hardware)
         self.test_trigger_button.setText('TRIGGER THỬ' if mode=='simulation' else 'TRIGGER TEST (SOFTWARE)')
         self.test_trigger_button.setEnabled(hardware and camera_running)
@@ -478,12 +566,19 @@ class MainWindow(QMainWindow):
         self.worker.jobs=jobs;self.worker.expected=expected
         self.worker.start(QThread.Priority.HighPriority)
     def connect_camera(self):
-        if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning():return
+        if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
         mode=self.source_mode.currentData()
         if mode not in ('hikrobot','simulation'):
             return QMessageBox.information(self,'Nguồn ảnh','Hãy chọn camera Hikrobot hoặc mô phỏng trigger.')
         try:expected=self.current_expected()
         except ValueError as exc:return QMessageBox.warning(self,'Kiểm tra thiết lập',str(exc))
+        try:
+            eject=self.current_eject_settings()
+            if eject.enabled:
+                if mode!='hikrobot':raise EjectorError('Chỉ bật đẩy với camera Hikrobot trigger ngoài')
+                eject.validate()
+        except (ValueError,EjectorError) as exc:
+            return QMessageBox.warning(self,'Thiết lập RS485',str(exc))
         roi_mode=self.roi_mode.currentData()
         if roi_mode=='fixed' and self.roi is None:
             return QMessageBox.warning(self,'Thiếu ROI','Hãy mở một ảnh chuẩn và khoanh vùng DATE trước khi ARM camera.')
@@ -496,11 +591,17 @@ class MainWindow(QMainWindow):
         self.banner.setText('ĐANG NẠP OCR & ARM CAMERA…')
         self.camera_worker.source=source;self.camera_worker.expected=expected
         self.camera_worker.roi=self.roi;self.camera_worker.roi_mode=roi_mode
+        self.camera_worker.eject_settings=eject
         self.camera_worker.timeout_ms=int(self.config.get('hardware',{}).get('frame_timeout_ms',100))
         self.source_mode.setEnabled(False);self.connect_camera_button.setEnabled(False)
         self.camera_serial.setEnabled(False);self.trigger_line.setEnabled(False)
+        for control in (self.eject_enabled,self.eject_port,self.refresh_ports,self.eject_slave,
+                        self.eject_channel,self.eject_delay,self.eject_pulse,self.test_eject_link,
+                        self.test_eject_pulse):
+            control.setEnabled(False)
         self.camera_worker.start(QThread.Priority.TimeCriticalPriority)
     def toggle_live_view(self):
+        if self.eject_test_worker.isRunning():return
         if self.live_worker.isRunning():
             self.live_worker.requestInterruption();self.live_button.setEnabled(False)
             self.show_status('Đang dừng CAMERA LIVE và khôi phục trigger cứng…')
@@ -586,12 +687,91 @@ class MainWindow(QMainWindow):
         self.details.setPlainText(text);self.show_status(last)
     def camera_finished(self):
         self.source_mode.setEnabled(True);self.camera_source=None
+        for control in (self.eject_enabled,self.eject_port,self.refresh_ports,self.eject_slave,
+                        self.eject_channel,self.eject_delay,self.eject_pulse,self.test_eject_link,
+                        self.test_eject_pulse):
+            control.setEnabled(True)
         self.disconnect_camera_button.setEnabled(False);self.source_changed()
         if self.camera_frames:
             passes=sum(r['validation']['result']=='PASS' for r,f in self.rows)
             self.show_status(f'Đã ngắt camera · {self.camera_frames} frame · {passes} đạt · {self.camera_frames-passes} lỗi')
         elif not self.details.toPlainText():self.show_status('Camera đã ngắt.')
         if self.closing:self.close()
+    def current_eject_settings(self):
+        return EjectorSettings(port=self.eject_port.currentText().strip(),baudrate=9600,
+            slave=int(self.eject_slave.currentText() or '0'),
+            channel=int(self.eject_channel.currentText()),
+            decision_delay_ms=int(self.eject_delay.value()),pulse_ms=int(self.eject_pulse.value()),
+            enabled=self.eject_enabled.isChecked())
+    def refresh_eject_ports(self):
+        try:
+            from serial.tools import list_ports
+            current=self.eject_port.currentText()
+            self.eject_port.clear()
+            self.eject_port.addItems([item.device for item in list_ports.comports()])
+            self.eject_port.setCurrentText(current)
+        except Exception as exc:self.show_status('Không quét được COM: '+str(exc))
+    def check_eject_link(self):
+        if self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
+        try:
+            settings=self.current_eject_settings()
+            # Link test only confirms communication and OFF readback. The
+            # A calibrated decision delay is required later, before arming ejection.
+            from dataclasses import replace
+            settings=replace(settings,decision_delay_ms=max(1,settings.decision_delay_ms))
+            settings.validate()
+            output=ModbusOutput(settings)
+            output.open()  # OFF write + readback, never ON
+            output.close()
+            self.eject_state.setText(f'RS485 OK · DO{settings.channel} OFF')
+            self.show_status('Đã xác nhận module RS485 trả lời và DO đang OFF')
+        except Exception as exc:
+            self.eject_state.setText('RS485 LỖI')
+            self.show_status('RS485: '+str(exc))
+    def test_ng_eject(self):
+        if (self.worker.isRunning() or self.camera_worker.isRunning() or
+                self.live_worker.isRunning() or self.eject_test_worker.isRunning()):return
+        try:
+            settings=self.current_eject_settings()
+            settings.validate()
+        except (ValueError,EjectorError) as exc:
+            return QMessageBox.warning(self,'Test xi lanh',str(exc))
+        self.save_operator_settings()
+        self.eject_test_worker.settings=settings
+        self.test_eject_pulse.setEnabled(False)
+        self.connect_camera_button.setEnabled(False)
+        self.test_eject_link.setEnabled(False)
+        for control in (self.eject_port,self.eject_slave,self.eject_channel,self.eject_delay,self.eject_pulse):
+            control.setEnabled(False)
+        self.eject_state.setText('TEST NG · ĐANG CHỜ DELAY')
+        self.eject_test_worker.start()
+        self.source_changed()
+    def eject_test_failed(self,detail):
+        self.eject_state.setText('TEST NG · LỖI')
+        self.show_status('Test xi lanh lỗi: '+detail)
+    def eject_test_finished(self):
+        self.test_eject_pulse.setEnabled(True)
+        self.test_eject_link.setEnabled(True)
+        for control in (self.eject_port,self.eject_slave,self.eject_channel,self.eject_delay,self.eject_pulse):
+            control.setEnabled(True)
+        self.source_changed()
+        if self.closing:self.close()
+    def on_eject_event(self,event):
+        phase=event['phase'];frame=event['frame_id']
+        test=bool(event.get('test'))
+        if not test and self.camera_worker.output:
+            path=self.camera_worker.output/'eject_events.jsonl'
+            with path.open('a',encoding='utf-8') as stream:
+                stream.write(json.dumps(event,ensure_ascii=False)+'\n')
+        self.eject_state.setText(f'TEST NG · {phase}' if test else f'RS485 {phase} · frame {frame}')
+        if phase=='ERROR':
+            if not test:self.camera_worker.requestInterruption()
+            self.banner.setText('LỖI RS485 · DỪNG CAMERA' if not test else 'TEST XI LANH LỖI')
+            self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:#ffe0df;color:#a72525')
+            self.show_status(str(event['detail']))
+        elif phase=='SCHEDULED':
+            self.show_status(f'NG giả lập: chờ {self.eject_delay.value():.0f} ms rồi bật DO{self.eject_channel.currentText()}')
+        else:self.show_status(f'Xi lanh {phase} · '+('NG giả lập' if test else f'frame {frame}'))
     def got_result(self,report,folder):
         self.append_result(report,folder);self.show_record(report,folder);self.latest_report=report
     def got_camera_result(self,report,folder,artifacts):
@@ -676,11 +856,13 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(output or ROOT/'data/debug')))
     def closeEvent(self,event):
         self.save_operator_settings()
-        if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning():
+        if (self.worker.isRunning() or self.camera_worker.isRunning() or
+                self.live_worker.isRunning() or self.eject_test_worker.isRunning()):
             self.closing=True
             if self.worker.isRunning():self.worker.requestInterruption()
             if self.camera_worker.isRunning():self.camera_worker.requestInterruption()
             if self.live_worker.isRunning():self.live_worker.requestInterruption()
+            if self.eject_test_worker.isRunning():self.eject_test_worker.requestInterruption()
             self.show_status('Đang hoàn tất ảnh hiện tại và ngắt camera trước khi đóng…');event.ignore()
         else:event.accept()
 

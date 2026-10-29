@@ -49,6 +49,7 @@ try {
         --distpath $dist --workpath $work --specpath $spec `
         --paths $vendor `
         --hidden-import onnxruntime.capi._pybind_state `
+        --hidden-import serial --hidden-import serial.tools.list_ports `
         --collect-binaries onnxruntime `
         @excludeArgs `
         (Join-Path $projectRoot "gui.py")
@@ -103,6 +104,14 @@ Copy-Item -LiteralPath `
     (Join-Path $projectRoot "config\config.json"), `
     (Join-Path $projectRoot "config\sample_rois.json") `
     -Destination (Join-Path $app "config")
+# A portable copy must never inherit an armed physical output from this PC.
+$packagedConfigPath = Join-Path $app "config\config.json"
+$packagedConfig = Get-Content -LiteralPath $packagedConfigPath -Raw | ConvertFrom-Json
+$packagedConfig | Add-Member -NotePropertyName ejector -NotePropertyValue @{
+    enabled = $false; port = ''; baudrate = 9600; slave = 1; channel = 1;
+    decision_delay_ms = 0; pulse_ms = 100
+} -Force
+$packagedConfig | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $packagedConfigPath -Encoding UTF8
 Copy-Item -LiteralPath `
     (Join-Path $projectRoot "data\models\english_g2_recognizer.onnx"), `
     (Join-Path $projectRoot "data\models\english_g2_recognizer.json") `
@@ -125,6 +134,10 @@ OCR DATE - CPU LITE - HIKROBOT TRIGGER
 3. Mo thu muc OCR_DATE_CPU_Lite va bam dup OCR_DATE.exe.
 4. Dung CAMERA LIVE de chinh lens, exposure va den.
 5. Dung TRIGGER TEST (SOFTWARE) de thu mot anh; khi san xuat dung Line0/Line1.
+6. RS485 mac dinh TAT. Do thoi gian tu ket qua NG den vi tri xi lanh,
+   cai Delay sau NG (ms), COM/slave/DO va xung, sau do moi bat day NG.
+7. Nut TEST NG -> XI LANH bat DO that mot lan sau delay de thu van/xi lanh,
+   khong can camera. Chi bam khi khu vuc day da an toan.
 
 Ban CPU Lite khong can Python, Internet, GPU roi, CUDA hay PyTorch. ONNX Runtime
 CPU dung 4 luong mac dinh, phu hop muc tieu Core i5 Gen 8 / RAM 8 GB. Nut LUU CAU
@@ -137,13 +150,13 @@ trigger truoc khi dua vao day chuyen. Log: data\logs. Anh/report: data\debug.
 
 @"
 OCR DATE PORTABLE - CPU LITE - HIKROBOT HARDWARE TRIGGER
-Build: 2026-10-01
+Build: 2026-10-29
 Windows 10/11 64-bit; Python 3.12 runtime bundled
 ONNX Runtime 1.30.0 CPU; OpenCV headless 4.14.0; PySide6 6.11.2
 No PyTorch, EasyOCR runtime, CUDA or discrete GPU required.
 HIKROBOT MVS 64-bit is required only for a real camera and is not bundled.
 "@ | Set-Content -LiteralPath (Join-Path $app "PHIEN_BAN.txt") -Encoding UTF8
 
-$zip = Join-Path $resolvedOutput "OCR_DATE_HIKROBOT_CPU_Lite_Windows_Portable_2026-10-01.zip"
+$zip = Join-Path $resolvedOutput "OCR_DATE_HIKROBOT_RS485_CPU_Lite_Windows_Portable_2026-10-29.zip"
 Compress-Archive -LiteralPath $app -DestinationPath $zip -CompressionLevel Optimal
 Write-Output $zip
