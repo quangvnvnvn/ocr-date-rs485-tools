@@ -25,6 +25,7 @@ first.ab.setText('07');first.dm.setCurrentText('3')
 first.threshold.setValue(.83);first.max_angle.setValue(4.2)
 first.date.setDate(QDate(2027,3,14))
 first.trial_date.setDate(QDate(2027,3,15))
+first.trial_ab.setText('09');first.trial_dm.setCurrentText('2')
 first.source_mode.setCurrentIndex(first.source_mode.findData('hikrobot'))
 first.camera_serial.setText('MV-TEST-001');first.trigger_line.setCurrentText('Line1')
 first.roi_mode.setCurrentIndex(first.roi_mode.findData('fixed'))
@@ -33,6 +34,7 @@ first.save_configuration();app.processEvents()
 saved=json.loads(TEST_CONFIG.read_text(encoding='utf-8'))
 assert saved['roi_mode']=='fixed'
 assert saved['trial_expected_date']=='2027-03-15'
+assert saved['trial_expected_ab']=='09' and saved['trial_expected_dm']==2
 assert saved['inspection']=={
     'expected_ab':'07','expected_dm':3,'minimum_confidence':.83,
     'check_nsx_date':True,'expected_date':'2027-03-14',
@@ -52,6 +54,7 @@ assert second.threshold.value()==.83
 assert second.max_angle.value()==4.2
 assert second.date.date().toString('yyyy-MM-dd')=='2027-03-14'
 assert second.trial_date.date().toString('yyyy-MM-dd')=='2027-03-15'
+assert second.trial_ab.text()=='09' and second.trial_dm.currentText()=='2'
 assert second.roi_mode.currentData()=='fixed'
 assert second.source_mode.currentData()=='hikrobot'
 assert second.camera_serial.text()=='MV-TEST-001'

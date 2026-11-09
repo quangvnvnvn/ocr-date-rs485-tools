@@ -370,7 +370,7 @@ class MainWindow(QMainWindow):
         camera_test_bar.addWidget(self.live_button)
         self.test_trigger_button=QPushButton('CHỤP THỬ 1 ẢNH (TRIGGER TAY)');self.test_trigger_button.clicked.connect(self.test_camera_trigger)
         self.test_trigger_button.setObjectName('primary')
-        self.test_trigger_button.setToolTip('Chụp một ảnh, đối chiếu ngày NSX đặt trong tab Chạy thử rồi ngắt camera. Không kích xi lanh.')
+        self.test_trigger_button.setToolTip('Chụp một ảnh, đối chiếu NSX, AB và DM trong tab Chạy thử rồi ngắt camera. Không kích xi lanh.')
         camera_test_bar.addWidget(self.test_trigger_button)
         self.camera_test_hint=QLabel('Chụp thử không cần tín hiệu ngoài · Không kích xi lanh')
         self.camera_test_hint.setObjectName('subtitle');camera_test_bar.addWidget(self.camera_test_hint);camera_test_bar.addStretch()
@@ -408,7 +408,12 @@ class MainWindow(QMainWindow):
         trial_settings.addWidget(QLabel('Ngày NSX cần đối chiếu khi chạy thử:'))
         self.trial_date=QDateEdit();self.trial_date.setCalendarPopup(True);self.trial_date.setDisplayFormat('dd/MM/yyyy')
         trial_settings.addWidget(self.trial_date)
-        trial_save=button('Lưu ngày thử',self.save_configuration,trial_settings)
+        self.trial_ab=QLineEdit('12');self.trial_ab.setMaximumWidth(65);self.trial_ab.setMaxLength(2)
+        self.trial_ab.setValidator(QRegularExpressionValidator(QRegularExpression('[0-9]{2}')))
+        trial_settings.addWidget(QLabel('Mã AB:'));trial_settings.addWidget(self.trial_ab)
+        self.trial_dm=QComboBox();self.trial_dm.addItems(['1','2','3'])
+        trial_settings.addWidget(QLabel('DM:'));trial_settings.addWidget(self.trial_dm)
+        trial_save=button('Lưu thông số chạy thử',lambda:self.save_configuration(trial=True),trial_settings)
         trial_save.setObjectName('saveSettings');trial_settings.addStretch()
         settings=QHBoxLayout();function_block(configuration,'ocrBlock').addLayout(settings)
         settings.addWidget(QLabel('Mã AB cần kiểm tra:'));self.ab=QLineEdit('12');self.ab.setMaximumWidth(65);self.ab.setMaxLength(2)
@@ -497,7 +502,8 @@ class MainWindow(QMainWindow):
         self.image_split.setSizes([850,350] if index==0 else [580,620])
         self.mode_tabs.updateGeometry()
     def lock_inspection_settings(self,locked):
-        for widget in (self.date,self.trial_date,self.ab,self.dm,self.threshold,self.max_angle,self.roi_mode):
+        for widget in (self.date,self.trial_date,self.ab,self.trial_ab,self.dm,self.trial_dm,
+                       self.threshold,self.max_angle,self.roi_mode):
             widget.setEnabled(not locked)
     def operator_tab_changed(self,index):
         self.update_operator_layout(index)
@@ -528,6 +534,10 @@ class MainWindow(QMainWindow):
             self.date.setDate(QDate(2026,8,22))
         trial_date=QDate.fromString(self.config.get('trial_expected_date') or '', 'yyyy-MM-dd')
         self.trial_date.setDate(trial_date if trial_date.isValid() else self.date.date())
+        trial_ab=str(self.config.get('trial_expected_ab',self.ab.text()))
+        self.trial_ab.setText(trial_ab if len(trial_ab)==2 and trial_ab.isascii() and trial_ab.isdigit() else self.ab.text())
+        trial_dm=self.trial_dm.findText(str(self.config.get('trial_expected_dm',self.dm.currentText())))
+        self.trial_dm.setCurrentIndex(trial_dm if trial_dm>=0 else self.dm.currentIndex())
         mode=self.roi_mode.findData(self.config.get('roi_mode','auto'))
         self.roi_mode.setCurrentIndex(mode if mode>=0 else 0)
         hardware=self.config.get('hardware',{})
@@ -546,6 +556,8 @@ class MainWindow(QMainWindow):
     def save_operator_settings(self):
         self.config['operator_tab']=self.mode_tabs.currentIndex()
         self.config['trial_expected_date']=self.trial_date.date().toString('yyyy-MM-dd')
+        self.config['trial_expected_ab']=self.trial_ab.text()
+        self.config['trial_expected_dm']=int(self.trial_dm.currentText())
         self.config['roi_mode']=self.roi_mode.currentData()
         self.config['inspection']={'expected_ab':self.ab.text(),'expected_dm':int(self.dm.currentText()),
             'minimum_confidence':self.threshold.value(),'check_nsx_date':True,
@@ -562,11 +574,9 @@ class MainWindow(QMainWindow):
             'decision_delay_ms':int(self.eject_delay.value()),'pulse_ms':int(self.eject_pulse.value())}
         if self.path and self.path.is_file():self.config['last_image']=str(self.path.resolve())
         write_json(self.config_path,self.config)
-    def save_configuration(self):
+    def save_configuration(self,*,trial=False):
         try:
-            Expected(self.ab.text(),int(self.dm.currentText()),self.threshold.value(),
-                check_nsx_date=True,expected_date=self.date.date().toPython(),
-                maximum_angle_deviation=self.max_angle.value())
+            self.current_expected(trial=trial)
         except ValueError as exc:
             self.show_status('Không thể lưu: '+str(exc));return
         if self.eject_enabled.isChecked():
@@ -646,8 +656,8 @@ class MainWindow(QMainWindow):
     def run_image(self):
         if self.path:self.begin([(self.path,self.roi,self.roi_mode.currentData())])
     def current_expected(self,*,trial=False):
-        date=self.trial_date if trial else self.date
-        return Expected(self.ab.text(),int(self.dm.currentText()),self.threshold.value(),
+        date,ab,dm=(self.trial_date,self.trial_ab,self.trial_dm) if trial else (self.date,self.ab,self.dm)
+        return Expected(ab.text(),int(dm.currentText()),self.threshold.value(),
             check_nsx_date=True,expected_date=date.date().toPython(),
             maximum_angle_deviation=self.max_angle.value())
     def begin(self,jobs):
@@ -996,7 +1006,7 @@ def main():
         window.load_path(ROOT/'data/test_images/date1.jpg',use_sample=True)
         window.source_mode.setCurrentIndex(window.source_mode.findData('simulation'))
         window.roi_mode.setCurrentIndex(window.roi_mode.findData('auto'))
-        window.ab.setText('12');window.dm.setCurrentText('1');window.threshold.setValue(.70)
+        window.trial_ab.setText('12');window.trial_dm.setCurrentText('1');window.threshold.setValue(.70)
         window.max_angle.setValue(3.0);window.trial_date.setDate(QDate(2026,8,22))
         def smoke_armed(info):
             if info.get('ready') and state['report'] is None:QTimer.singleShot(0,window.simulate_trigger)
