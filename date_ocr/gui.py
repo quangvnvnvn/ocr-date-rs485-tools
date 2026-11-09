@@ -125,7 +125,7 @@ class CameraWorker(QThread):
         super().__init__();self.runtime=runtime or InspectionRuntime();self.source=None
         self.expected=None;self.roi=None;self.roi_mode='auto';self.timeout_ms=100;self.output=None
         self.eject_settings=None;self.ejector=None
-        self.production=False
+        self.production=False;self.manual_trigger=False
     def run(self):
         records=[];daily_log=None
         try:
@@ -137,18 +137,27 @@ class CameraWorker(QThread):
                     lambda phase,frame_id,detail,when:self.eject_event.emit(dict(
                         phase=phase,frame_id=frame_id,detail=detail,monotonic=when)))
                 self.ejector.start()
-            self.status.emit('Đang mở camera và bật trigger cứng…')
+            self.status.emit('Đang mở camera để chụp thử…' if self.manual_trigger
+                             else 'Đang mở camera và bật trigger cứng…')
             self.source.open();self.source.start()
             self.output=(ROOT/'data/production' if self.production else ROOT/'data/debug'/('camera_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]))
             self.output.mkdir(parents=True,exist_ok=True)
             if self.production:daily_log=DailyProductionLog(self.output,self.status.emit)
-            self.armed.emit({'ready':True,'source':type(self.source).__name__})
-            self.status.emit('CAMERA ĐÃ ARM • Chờ tín hiệu trigger ngoài')
+            if self.manual_trigger:
+                self.source.software_trigger_once()
+                trigger_deadline=time.monotonic()+2
+                self.status.emit('Đã gửi trigger tay • Đang chờ ảnh từ camera…')
+            else:
+                self.armed.emit({'ready':True,'source':type(self.source).__name__})
+                self.status.emit('CAMERA ĐÃ ARM • Chờ tín hiệu trigger ngoài')
             sequence=0;last_frame_id=None
             while not self.isInterruptionRequested():
                 if daily_log:daily_log.check()
                 packet=self.source.get_frame(self.timeout_ms)
-                if packet is None:continue
+                if packet is None:
+                    if self.manual_trigger and time.monotonic()>=trigger_deadline:
+                        raise FrameSourceError('Không nhận được ảnh trong 2 giây sau khi gửi trigger tay.')
+                    continue
                 captured_at=now_local()
                 sequence+=1
                 name=f'frame_{packet.frame_id or sequence:08d}_{datetime.now().strftime("%H%M%S_%f")[:-3]}.png'
@@ -200,6 +209,7 @@ class CameraWorker(QThread):
                 if not self.production:
                     for artifact_name,array in artifacts.items():save_image(folder/f'{artifact_name}.png',array)
                     write_json(folder/'result.json',report)
+                if self.manual_trigger:break
             if not self.production:save_report(self.output,records)
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -347,7 +357,7 @@ class MainWindow(QMainWindow):
         self.camera_serial.setMaximumWidth(190);camera_bar.addWidget(self.camera_serial)
         camera_bar.addWidget(QLabel('Ngõ vào:'))
         self.trigger_line=QComboBox();self.trigger_line.addItems(['Line0','Line1']);camera_bar.addWidget(self.trigger_line)
-        self.connect_camera_button=QPushButton('KẾT NỐI + ARM');self.connect_camera_button.clicked.connect(self.connect_camera)
+        self.connect_camera_button=QPushButton('KẾT NỐI + ARM');self.connect_camera_button.clicked.connect(lambda: self.connect_camera())
         self.connect_camera_button.setObjectName('primary');camera_bar.addWidget(self.connect_camera_button)
         self.disconnect_camera_button=QPushButton('NGẮT CAMERA');self.disconnect_camera_button.clicked.connect(self.disconnect_camera)
         camera_bar.addWidget(self.disconnect_camera_button)
@@ -358,10 +368,11 @@ class MainWindow(QMainWindow):
         self.live_button=QPushButton('CAMERA LIVE');self.live_button.clicked.connect(self.toggle_live_view)
         self.live_button.setToolTip('Xem hình liên tục để chỉnh lens. Dừng LIVE sẽ tự khôi phục trigger ngoài.')
         camera_test_bar.addWidget(self.live_button)
-        self.test_trigger_button=QPushButton('TRIGGER TEST (SOFTWARE)');self.test_trigger_button.clicked.connect(self.test_camera_trigger)
-        self.test_trigger_button.setToolTip('Phát đúng 1 software trigger để kiểm tra kết nối; camera tự trở về ngõ trigger ngoài sau đó.')
+        self.test_trigger_button=QPushButton('CHỤP THỬ 1 ẢNH (TRIGGER TAY)');self.test_trigger_button.clicked.connect(self.test_camera_trigger)
+        self.test_trigger_button.setObjectName('primary')
+        self.test_trigger_button.setToolTip('Tự mở camera Hikrobot, chụp một ảnh, chạy OCR rồi ngắt camera. Không kích xi lanh.')
         camera_test_bar.addWidget(self.test_trigger_button)
-        self.camera_test_hint=QLabel('LIVE chỉ dùng chỉnh lens · Sản xuất vẫn dùng Line0')
+        self.camera_test_hint=QLabel('Chụp thử không cần tín hiệu ngoài · Không kích xi lanh')
         self.camera_test_hint.setObjectName('subtitle');camera_test_bar.addWidget(self.camera_test_hint);camera_test_bar.addStretch()
         self.source_mode.currentIndexChanged.connect(self.source_changed)
         eject_bar=QHBoxLayout();function_block(configuration,'rs485Block').addLayout(eject_bar)
@@ -429,7 +440,6 @@ class MainWindow(QMainWindow):
         self.save_roi_button=button('Lưu vùng',self.save_roi,roi_bar)
         self.reset_roi_button=button('Xóa vùng',self.reset_roi,roi_bar)
         self.coords=QLabel('');roi_bar.addWidget(self.coords);roi_bar.addStretch()
-        test_arm=QPushButton('Kết nối camera để test');test_arm.clicked.connect(self.arm_test_camera);diagnostics.addWidget(test_arm)
         simulator=QPushButton('Bật mô phỏng trigger bằng ảnh');simulator.clicked.connect(self.arm_simulator);trial.addWidget(simulator)
         simulated_trigger=QPushButton('Phát trigger mô phỏng');simulated_trigger.clicked.connect(self.simulate_trigger);trial.addWidget(simulated_trigger)
         for page_layout in (trial,diagnostics):
@@ -488,9 +498,6 @@ class MainWindow(QMainWindow):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
         if index in (0,1):
             self.source_mode.setCurrentIndex(self.source_mode.findData('hikrobot' if index==0 else 'static'))
-    def arm_test_camera(self):
-        if self.camera_worker.isRunning() or self.live_worker.isRunning():return
-        self.source_mode.setCurrentIndex(self.source_mode.findData('hikrobot'));self.connect_camera(diagnostic=True)
     def arm_simulator(self):
         if self.camera_worker.isRunning() or self.live_worker.isRunning():return
         if self.eject_enabled.isChecked():
@@ -575,10 +582,7 @@ class MainWindow(QMainWindow):
         self.live_button.setVisible(mode=='hikrobot')
         self.live_button.setText('DỪNG LIVE' if live_running else 'CAMERA LIVE')
         self.live_button.setEnabled(mode=='hikrobot' and not camera_running and not test_running)
-        self.test_trigger_button.setVisible(hardware)
-        self.test_trigger_button.setText('TRIGGER THỬ' if mode=='simulation' else 'TRIGGER TEST (SOFTWARE)')
-        self.test_trigger_button.setEnabled(hardware and camera_running)
-        self.camera_test_label.setVisible(hardware);self.camera_test_hint.setVisible(hardware)
+        self.test_trigger_button.setEnabled(not running)
         self.open_button.setEnabled(not running)
         self.sample_button.setEnabled(not running)
         self.run_button.setEnabled(mode=='static' and not running)
@@ -646,16 +650,16 @@ class MainWindow(QMainWindow):
         self.history.setEnabled(False);self.stop.setEnabled(True);self.rows=[];self.history.setRowCount(0)
         self.worker.jobs=jobs;self.worker.expected=expected
         self.worker.start(QThread.Priority.HighPriority)
-    def connect_camera(self,diagnostic=False):
+    def connect_camera(self,*,manual_trigger=False):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
-        mode=self.source_mode.currentData()
+        mode='hikrobot' if manual_trigger else self.source_mode.currentData()
         if mode not in ('hikrobot','simulation'):
             return QMessageBox.information(self,'Nguồn ảnh','Hãy chọn camera Hikrobot hoặc mô phỏng trigger.')
         try:expected=self.current_expected()
         except ValueError as exc:return QMessageBox.warning(self,'Kiểm tra thiết lập',str(exc))
         try:
             eject=self.current_eject_settings()
-            if diagnostic:
+            if manual_trigger:
                 from dataclasses import replace
                 eject=replace(eject,enabled=False)
             if eject.enabled:
@@ -665,9 +669,12 @@ class MainWindow(QMainWindow):
             return QMessageBox.warning(self,'Thiết lập RS485',str(exc))
         roi_mode=self.roi_mode.currentData()
         if roi_mode=='fixed' and self.roi is None:
-            return QMessageBox.warning(self,'Thiếu ROI','Hãy mở một ảnh chuẩn và khoanh vùng DATE trước khi ARM camera.')
+            if not manual_trigger:
+                return QMessageBox.warning(self,'Thiếu ROI','Hãy mở một ảnh chuẩn và khoanh vùng DATE trước khi ARM camera.')
+            roi_mode='auto'
         if mode=='hikrobot':
-            source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText())
+            source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText(),
+                                     software_test=manual_trigger)
         else:
             source=TriggeredImageSource(capacity=1)
         self.camera_source=source;self.camera_frames=0;self.camera_passes=0;self.rows=[];self.history.setRowCount(0)
@@ -676,7 +683,8 @@ class MainWindow(QMainWindow):
         self.camera_worker.source=source;self.camera_worker.expected=expected
         self.camera_worker.roi=self.roi;self.camera_worker.roi_mode=roi_mode
         self.camera_worker.eject_settings=eject
-        self.camera_worker.production=(mode=='hikrobot' and not diagnostic)
+        self.camera_worker.production=(mode=='hikrobot' and not manual_trigger)
+        self.camera_worker.manual_trigger=manual_trigger
         self.camera_worker.timeout_ms=int(self.config.get('hardware',{}).get('frame_timeout_ms',100))
         self.source_mode.setEnabled(False);self.connect_camera_button.setEnabled(False)
         self.camera_serial.setEnabled(False);self.trigger_line.setEnabled(False)
@@ -685,6 +693,7 @@ class MainWindow(QMainWindow):
                         self.test_eject_pulse):
             control.setEnabled(False)
         self.camera_worker.start(QThread.Priority.TimeCriticalPriority)
+        self.source_changed()
         self.lock_inspection_settings(True)
     def toggle_live_view(self):
         if self.eject_test_worker.isRunning():return
@@ -737,23 +746,18 @@ class MainWindow(QMainWindow):
             self.camera_worker.requestInterruption();self.disconnect_camera_button.setEnabled(False)
             self.show_status('Đang ngắt camera sau chu kỳ chờ frame hiện tại…')
     def test_camera_trigger(self):
+        self.connect_camera(manual_trigger=True)
+    def simulate_trigger(self):
         if not self.camera_worker.isRunning():return
         try:
             if isinstance(self.camera_source,TriggeredImageSource):
                 if self.image is None:return self.show_status('Chưa có ảnh mẫu để mô phỏng trigger.')
                 packet=self.camera_source.trigger(self.image,self.path.name if self.path else 'current')
                 self.show_status(f'Đã phát trigger thử #{packet.frame_id} • đang xử lý')
-            elif isinstance(self.camera_source,HikrobotMvsSource):
-                self.test_trigger_button.setEnabled(False)
-                self.camera_source.software_trigger_once()
-                self.show_status(f'Đã phát 1 software trigger test • camera đã trở về {self.camera_source.trigger_source}')
         except FrameSourceError as exc:
             self.banner.setText('KHÔNG ĐẠT  ·  FAIL_BUSY')
             self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:#ffe0df;color:#a72525')
             self.show_status(str(exc))
-            self.test_trigger_button.setEnabled(True)
-    def simulate_trigger(self):
-        self.test_camera_trigger()
     def camera_armed(self,info):
         ready=bool(info.get('ready'))
         if ready:
@@ -761,7 +765,6 @@ class MainWindow(QMainWindow):
             self.camera_state.setText('ĐÃ ARM • CHỜ TRIGGER')
             self.camera_state.setStyleSheet('font-weight:800;color:#087448')
             self.disconnect_camera_button.setEnabled(True)
-            self.test_trigger_button.setEnabled(isinstance(self.camera_source,(TriggeredImageSource,HikrobotMvsSource)))
             self.banner.setText('SẴN SÀNG  ·  CHỜ TRIGGER NGOÀI')
             self.banner.setStyleSheet('font-size:22px;font-weight:bold;padding:10px;background:#d7f3e4;color:#11663f')
         else:
@@ -783,7 +786,8 @@ class MainWindow(QMainWindow):
         self.disconnect_camera_button.setEnabled(False);self.source_changed()
         if self.camera_frames:
             passes=self.camera_passes
-            self.show_status(f'Đã ngắt camera · {self.camera_frames} frame · {passes} đạt · {self.camera_frames-passes} lỗi')
+            label='Đã chụp thử và ngắt camera' if self.camera_worker.manual_trigger else 'Đã ngắt camera'
+            self.show_status(f'{label} · {self.camera_frames} frame · {passes} đạt · {self.camera_frames-passes} lỗi')
         elif not self.details.toPlainText():self.show_status('Camera đã ngắt.')
         if self.closing:self.close()
     def current_eject_settings(self):
@@ -867,8 +871,8 @@ class MainWindow(QMainWindow):
         self.camera_frames+=1;self.append_result(report,folder)
         self.camera_passes+=int(report['validation']['result']=='PASS')
         self.show_record(report,folder,artifacts);self.latest_report=report
-        self.test_trigger_button.setEnabled(True)
-        self.show_status(f'CAMERA ĐÃ ARM • Frame {self.camera_frames} • {report["validation"]["result"]} • {report.get("processing_ms",0):.1f} ms')
+        mode='TRIGGER TAY' if self.camera_worker.manual_trigger else 'CAMERA ĐÃ ARM'
+        self.show_status(f'{mode} • Frame {self.camera_frames} • {report["validation"]["result"]} • {report.get("processing_ms",0):.1f} ms')
     def append_result(self,report,folder):
         if report.get('production') and len(self.rows)>=500:
             self.rows.pop(0);self.history.removeRow(0)

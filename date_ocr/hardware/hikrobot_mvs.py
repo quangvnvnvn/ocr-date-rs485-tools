@@ -106,12 +106,14 @@ class HikrobotMvsSource(FrameSource):
         trigger_source: str = "Line0",
         *,
         sdk: Any | None = None,
+        software_test: bool = False,
     ) -> None:
         if trigger_source not in {"Line0", "Line1"}:
             raise ValueError("Ngõ trigger chỉ hỗ trợ Line0 hoặc Line1")
         self.serial_number = serial_number.strip()
         self.trigger_source = trigger_source
         self.sdk = sdk
+        self.software_test = software_test
         self.camera = None
         self.device = None
         self.device_serial = ""
@@ -180,11 +182,14 @@ class HikrobotMvsSource(FrameSource):
                 ),
                 "bật trigger cứng",
             )
-            source_name = "MV_TRIGGER_SOURCE_" + self.trigger_source.upper()
-            source_value = getattr(self.sdk, source_name, 0 if self.trigger_source == "Line0" else 1)
+            source_value = (
+                int(getattr(self.sdk, "MV_TRIGGER_SOURCE_SOFTWARE", 7))
+                if self.software_test else self._hardware_trigger_value()
+            )
+            source_label = "Software" if self.software_test else self.trigger_source
             self._ok(
-                self.camera.MV_CC_SetEnumValue("TriggerSource", int(source_value)),
-                f"chọn {self.trigger_source}",
+                self.camera.MV_CC_SetEnumValue("TriggerSource", source_value),
+                f"chọn {source_label}",
             )
             self._live_mode = False
             self._pending_software_tests = 0
@@ -259,6 +264,10 @@ class HikrobotMvsSource(FrameSource):
         software_value = int(getattr(self.sdk, "MV_TRIGGER_SOURCE_SOFTWARE", 7))
         hardware_value = self._hardware_trigger_value()
         with self._sdk_lock:
+            if self.software_test:
+                self._ok(self.camera.MV_CC_SetCommandValue("TriggerSoftware"), "phát software trigger thử")
+                self._pending_software_tests += 1
+                return
             self._ok(
                 self.camera.MV_CC_SetEnumValue("TriggerSource", software_value),
                 "chuyển tạm sang software trigger",

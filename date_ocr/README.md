@@ -6,7 +6,10 @@ dải tối phía dưới và đạt giới hạn lệch góc 3°. Đây là rep
 đã chụp; vẫn phải nghiệm thu với trigger, lens, đèn và tốc độ dây chuyền thật.
 GUI hỗ trợ ảnh tĩnh, mô phỏng trigger và camera công nghiệp Hikrobot qua MVS SDK.
 PLC/cảm biến kích trực tiếp ngõ Line0/Line1 của camera. Sản xuất chỉ ARM,
-nhận frame và xử lý; software trigger chỉ có nút test một frame cho kỹ thuật viên.
+nhận frame và xử lý. Khi camera đang rảnh, vào **Test chức năng → Chụp thử 1 ảnh
+(Trigger tay)**. Ứng dụng tự mở camera, chụp một ảnh bằng software trigger,
+hiển thị kết quả OCR rồi ngắt camera. Kết quả thử không ghi vào Excel sản xuất
+và không kích xi lanh.
 
 ## Chế độ quyết định 100 ms
 
