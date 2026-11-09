@@ -30,6 +30,7 @@ first.deadline_ms.setValue(150)
 first.mode_tabs.setCurrentIndex(3)
 first.source_mode.setCurrentIndex(first.source_mode.findData('hikrobot'))
 first.camera_serial.setText('MV-TEST-001');first.trigger_line.setCurrentText('Line1')
+first.exposure_us.setValue(800)
 first.roi_mode.setCurrentIndex(first.roi_mode.findData('fixed'))
 first.roi=FixedROI(700,900,600,240,1926,2568);first.update_roi()
 first.save_configuration();app.processEvents()
@@ -45,6 +46,7 @@ assert saved['fixed_roi']['x']==700 and saved['fixed_roi']['width']==600
 assert saved['hardware']['source_mode']=='hikrobot'
 assert saved['hardware']['serial_number']=='MV-TEST-001'
 assert saved['hardware']['trigger_source']=='Line1'
+assert saved['hardware']['exposure_us']==800
 assert saved['hardware']['external_trigger_only'] is True
 assert Path(saved['last_image']).resolve()==last_image.resolve()
 first.close()
@@ -62,6 +64,7 @@ assert second.roi_mode.currentData()=='fixed'
 assert second.source_mode.currentData()=='hikrobot'
 assert second.camera_serial.text()=='MV-TEST-001'
 assert second.trigger_line.currentText()=='Line1'
+assert second.exposure_us.value()==800
 assert second.roi is not None and second.roi.x==700 and second.roi.width==600
 assert second.path.resolve()==last_image.resolve()
 second.grab().save(str(ROOT/'data/debug/gui_persistence.png'))

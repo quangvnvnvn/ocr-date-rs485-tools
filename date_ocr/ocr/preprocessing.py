@@ -201,15 +201,22 @@ def _global_threshold_layout(corrected):
     return binary,fields,rows
 
 
-def preprocess(image):
+def preprocess(image,*,allow_unrotated=False):
     if image is None or image.size==0 or min(image.shape[:2])<32:
         raise LayoutError('Empty or too small ROI')
     gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY) if image.ndim==3 else image.copy()
     _,binary=cv2.threshold(gray,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
     h,w=gray.shape
-    angle=estimate_skew(binary)
-    matrix=cv2.getRotationMatrix2D((w/2,h/2),angle,1)
-    corrected=cv2.warpAffine(gray,matrix,(w,h),borderValue=255)
+    try:
+        angle=estimate_skew(binary)
+    except LayoutError:
+        if not allow_unrotated:
+            raise
+        angle=None
+    corrected=gray
+    if angle is not None:
+        matrix=cv2.getRotationMatrix2D((w/2,h/2),angle,1)
+        corrected=cv2.warpAffine(gray,matrix,(w,h),borderValue=255)
     global_layout=_global_threshold_layout(corrected)
     global_layout_clean=global_layout is not None
     if global_layout_clean:

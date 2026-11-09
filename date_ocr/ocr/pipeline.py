@@ -24,7 +24,8 @@ def choose_candidate(candidates,minimum):
     return selected,len(signatures)>1,score(selected)
 
 
-def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,prefer_gray=False):
+def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,prefer_gray=False,
+                  allow_unrotated=False):
     started=time.perf_counter()
     report={'candidates':[], 'ocr_device':str(getattr(engine,'device','unknown')),
         'expected':dict(ab=expected.ab,dm=expected.dm,
@@ -44,7 +45,7 @@ def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,pr
         report['bbox']=roi.bounds(image.shape)
         artifacts['roi']=crop
         stage=time.perf_counter()
-        variants,fields,metrics=preprocess(crop)
+        variants,fields,metrics=preprocess(crop,allow_unrotated=allow_unrotated)
         report['stage_ms']['preprocess']=round((time.perf_counter()-stage)*1000,2)
         artifacts.update(variants)
         report.update(metrics=metrics,field_boxes=fields)

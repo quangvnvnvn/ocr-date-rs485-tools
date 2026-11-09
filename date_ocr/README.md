@@ -11,6 +11,11 @@ nhận frame và xử lý. Khi camera đang rảnh, vào **Chạy thử → Phá
 hiển thị kết quả OCR rồi ngắt camera. Kết quả thử không ghi vào Excel sản xuất
 và không kích xi lanh.
 
+Khi vỉ chạy trên băng, chọn **Chạy thử → Chờ cảm biến · Chụp 1 ảnh** để đợi
+một xung ở Line0/Line1 trong tối đa 15 giây. Trong **Cài đặt**, mục **Phơi sáng**
+dùng đơn vị µs và được áp dụng khi mở camera. Chọn **Theo camera** để dùng giá trị
+đang có trên thiết bị. Tab Camera Live hiển thị giá trị đọc được khi mở camera.
+
 ## Chế độ quyết định 100 ms
 
 Luồng mặc định dùng ONNX Runtime CPU 4 luồng, không cần GPU rời/CUDA/PyTorch,

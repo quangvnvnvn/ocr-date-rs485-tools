@@ -94,18 +94,31 @@ class InspectionRuntime:
 
             report, artifacts = inspect_image(inspection_image, roi, self.engine, expected, deadline_ms)
             if roi_mode == "fixed" and roi is not None:
-                if report["validation"]["result"] == "FAIL_ROI_NOT_FOUND" and "roi" in artifacts:
-                    inner = locate_inkjet_rows(artifacts["roi"])
+                refined = False
+                for _ in range(2):
+                    if report["validation"]["result"] != "FAIL_ROI_NOT_FOUND" or "roi" not in artifacts:
+                        break
+                    crop = artifacts["roi"]
+                    inner = locate_inkjet_rows(crop)
+                    left_offset = 0
+                    if inner is None and not refined and not check_alignment:
+                        # On wide conveyor views, package artwork to the left
+                        # can hide the two-line projection of the stamp.
+                        left_offset = round(crop.shape[1]*.25)
+                        inner = locate_inkjet_rows(crop[:,left_offset:])
                     # Reserve the majority of the frame budget for OCR and alignment.
                     elapsed_ms = (time.perf_counter()-decision_started)*1000
-                    if inner is not None and elapsed_ms < deadline_ms*.40:
-                        x, y, _, _ = report["bbox"]
-                        left, top, width, height = inner
-                        h, w = image.shape[:2]
-                        roi = FixedROI(x+left, y+top, width, height, w, h)
-                        report, artifacts = inspect_image(image, roi, self.engine, expected, deadline_ms,
-                                                          prefer_gray=True)
-                        report["refined_fixed_roi"] = True
+                    if inner is None or elapsed_ms >= deadline_ms*.40:
+                        break
+                    x, y, _, _ = report["bbox"]
+                    left, top, width, height = inner
+                    h, w = image.shape[:2]
+                    roi = FixedROI(x+left_offset+left, y+top, width, height, w, h)
+                    report, artifacts = inspect_image(image, roi, self.engine, expected, deadline_ms,
+                                                      prefer_gray=True,allow_unrotated=left_offset>0)
+                    refined = True
+                if refined:
+                    report["refined_fixed_roi"] = True
                 if check_alignment:
                     alignment_image, alignment_height = fixed_alignment_region(image, roi)
                     metrics = report.get("metrics")

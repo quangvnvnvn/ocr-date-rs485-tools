@@ -130,7 +130,7 @@ class CameraWorker(QThread):
         self.expected=None;self.roi=None;self.roi_mode='auto';self.timeout_ms=100;self.output=None
         self.deadline_ms=DEFAULT_DEADLINE_MS
         self.eject_settings=None;self.ejector=None
-        self.production=False;self.manual_trigger=False
+        self.production=False;self.manual_trigger=False;self.sensor_test=False
     def run(self):
         records=[];daily_log=None
         try:
@@ -142,7 +142,8 @@ class CameraWorker(QThread):
                     lambda phase,frame_id,detail,when:self.eject_event.emit(dict(
                         phase=phase,frame_id=frame_id,detail=detail,monotonic=when)))
                 self.ejector.start()
-            self.status.emit('Đang mở camera để chụp thử…' if self.manual_trigger
+            capture_once=self.manual_trigger or self.sensor_test
+            self.status.emit('Đang mở camera để chụp thử…' if capture_once
                              else 'Đang mở camera và bật trigger cứng…')
             self.source.open();self.source.start()
             self.output=(ROOT/'data/production' if self.production else ROOT/'data/debug'/('camera_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6]))
@@ -153,14 +154,19 @@ class CameraWorker(QThread):
                 trigger_deadline=time.monotonic()+2
                 self.status.emit('Đã gửi trigger tay • Đang chờ ảnh từ camera…')
             else:
+                if self.sensor_test:
+                    trigger_deadline=time.monotonic()+15
                 self.armed.emit({'ready':True,'source':type(self.source).__name__})
-                self.status.emit('CAMERA ĐÃ ARM • Chờ tín hiệu trigger ngoài')
+                self.status.emit('Đang chờ một xung cảm biến • Tối đa 15 giây' if self.sensor_test
+                                 else 'CAMERA ĐÃ ARM • Chờ tín hiệu trigger ngoài')
             sequence=0;last_frame_id=None
             while not self.isInterruptionRequested():
                 if daily_log:daily_log.check()
                 packet=self.source.get_frame(self.timeout_ms)
                 if packet is None:
-                    if self.manual_trigger and time.monotonic()>=trigger_deadline:
+                    if capture_once and time.monotonic()>=trigger_deadline:
+                        if self.sensor_test:
+                            raise FrameSourceError('Không nhận được ảnh từ cảm biến trong 15 giây.')
                         raise FrameSourceError('Không nhận được ảnh trong 2 giây sau khi gửi trigger tay.')
                     continue
                 captured_at=now_local()
@@ -215,7 +221,7 @@ class CameraWorker(QThread):
                 if not self.production:
                     for artifact_name,array in artifacts.items():save_image(folder/f'{artifact_name}.png',array)
                     write_json(folder/'result.json',report)
-                if self.manual_trigger:break
+                if capture_once:break
             if not self.production:save_report(self.output,records,include_alignment=False)
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -364,6 +370,11 @@ class MainWindow(QMainWindow):
         self.camera_serial.setMaximumWidth(190);camera_bar.addWidget(self.camera_serial)
         camera_bar.addWidget(QLabel('Ngõ vào:'))
         self.trigger_line=QComboBox();self.trigger_line.addItems(['Line0','Line1']);camera_bar.addWidget(self.trigger_line)
+        camera_bar.addWidget(QLabel('Phơi sáng:'))
+        self.exposure_us=QSpinBox();self.exposure_us.setRange(0,1000000);self.exposure_us.setSingleStep(100)
+        self.exposure_us.setSuffix(' µs');self.exposure_us.setSpecialValueText('Theo camera')
+        self.exposure_us.setToolTip('Thời gian phơi sáng tính bằng micro giây. Giá trị khác 0 dùng phơi sáng tay khi mở camera.')
+        camera_bar.addWidget(self.exposure_us)
         self.connect_camera_button=QPushButton('KẾT NỐI + ARM');self.connect_camera_button.clicked.connect(lambda: self.connect_camera())
         self.connect_camera_button.setObjectName('primary');camera_bar.addWidget(self.connect_camera_button)
         self.disconnect_camera_button=QPushButton('NGẮT CAMERA');self.disconnect_camera_button.clicked.connect(self.disconnect_camera)
@@ -465,7 +476,12 @@ class MainWindow(QMainWindow):
         self.trial_trigger_button=QPushButton('PHÁT TRIGGER THỬ · CHỤP 1 ẢNH')
         self.trial_trigger_button.setObjectName('primary')
         self.trial_trigger_button.setToolTip(self.test_trigger_button.toolTip())
-        self.trial_trigger_button.clicked.connect(self.test_camera_trigger);trial.addWidget(self.trial_trigger_button)
+        trigger_bar=QHBoxLayout();trial.addLayout(trigger_bar)
+        self.trial_trigger_button.clicked.connect(self.test_camera_trigger);trigger_bar.addWidget(self.trial_trigger_button)
+        self.sensor_test_button=QPushButton('CHỜ CẢM BIẾN · CHỤP 1 ẢNH')
+        self.sensor_test_button.setToolTip('Chờ tối đa 15 giây ở ngõ Line0/Line1 đã cài. Chụp thử một ảnh và không kích xi lanh.')
+        self.sensor_test_button.clicked.connect(lambda:self.connect_camera(sensor_test=True))
+        trigger_bar.addWidget(self.sensor_test_button)
         for page_layout in (trial,diagnostics):
             disconnect=QPushButton('Ngắt camera');disconnect.clicked.connect(self.disconnect_camera);page_layout.addWidget(disconnect)
         camera_bar.itemAt(0).widget().hide();self.source_mode.hide()
@@ -563,6 +579,9 @@ class MainWindow(QMainWindow):
         self.camera_serial.setText(str(hardware.get('serial_number','')))
         line=self.trigger_line.findText(str(hardware.get('trigger_source','Line0')))
         self.trigger_line.setCurrentIndex(line if line>=0 else 0)
+        exposure=hardware.get('exposure_us',0)
+        if type(exposure) is int and 0<=exposure<=self.exposure_us.maximum():
+            self.exposure_us.setValue(exposure)
         eject=self.config.get('ejector',{})
         self.eject_enabled.setChecked(bool(eject.get('enabled',False)))
         self.eject_port.setCurrentText(str(eject.get('port','')))
@@ -582,6 +601,7 @@ class MainWindow(QMainWindow):
         self.config['hardware']={'source_mode':self.source_mode.currentData(),
             'provider':'hikrobot_mvs','serial_number':self.camera_serial.text().strip(),
             'trigger_mode':'hardware','trigger_source':self.trigger_line.currentText(),
+            'exposure_us':self.exposure_us.value(),
             'frame_timeout_ms':100,'external_trigger_only':True}
         self.config['ejector']={'enabled':self.eject_enabled.isChecked(),
             'port':self.eject_port.currentText().strip(),'baudrate':9600,
@@ -612,6 +632,7 @@ class MainWindow(QMainWindow):
         hardware=mode in ('hikrobot','simulation')
         self.camera_serial.setEnabled(mode=='hikrobot' and not running)
         self.trigger_line.setEnabled(mode=='hikrobot' and not running)
+        self.exposure_us.setEnabled(not running)
         self.connect_camera_button.setEnabled(hardware and not running)
         self.disconnect_camera_button.setEnabled(camera_running)
         if not live_running:
@@ -621,6 +642,7 @@ class MainWindow(QMainWindow):
                                         if camera_running or test_running else 'Xem hình trực tiếp để chỉnh nét và ánh sáng.')
         self.test_trigger_button.setEnabled(not running)
         self.trial_trigger_button.setEnabled(not running)
+        self.sensor_test_button.setEnabled(not running)
         self.open_button.setEnabled(not running)
         self.sample_button.setEnabled(not running)
         self.run_button.setEnabled(mode=='static' and not running)
@@ -688,16 +710,17 @@ class MainWindow(QMainWindow):
         self.history.setEnabled(False);self.stop.setEnabled(True);self.rows=[];self.history.setRowCount(0)
         self.worker.jobs=jobs;self.worker.expected=expected;self.worker.deadline_ms=self.deadline_ms.value()
         self.worker.start(QThread.Priority.HighPriority)
-    def connect_camera(self,*,manual_trigger=False):
+    def connect_camera(self,*,manual_trigger=False,sensor_test=False):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
-        mode='hikrobot' if manual_trigger else self.source_mode.currentData()
+        capture_once=manual_trigger or sensor_test
+        mode='hikrobot' if capture_once else self.source_mode.currentData()
         if mode not in ('hikrobot','simulation'):
             return QMessageBox.information(self,'Nguồn ảnh','Hãy chọn camera Hikrobot hoặc mô phỏng trigger.')
-        try:expected=self.current_expected(trial=manual_trigger or mode=='simulation')
+        try:expected=self.current_expected(trial=capture_once or mode=='simulation')
         except ValueError as exc:return QMessageBox.warning(self,'Kiểm tra thiết lập',str(exc))
         try:
             eject=self.current_eject_settings()
-            if manual_trigger:
+            if capture_once:
                 from dataclasses import replace
                 eject=replace(eject,enabled=False)
             if eject.enabled:
@@ -707,12 +730,12 @@ class MainWindow(QMainWindow):
             return QMessageBox.warning(self,'Thiết lập RS485',str(exc))
         roi_mode=self.roi_mode.currentData()
         if roi_mode=='fixed' and self.roi is None:
-            if not manual_trigger:
+            if not capture_once:
                 return QMessageBox.warning(self,'Thiếu ROI','Hãy mở một ảnh chuẩn và khoanh vùng DATE trước khi ARM camera.')
             roi_mode='auto'
         if mode=='hikrobot':
             source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText(),
-                                     software_test=manual_trigger)
+                                     software_test=manual_trigger,exposure_us=self.exposure_us.value() or None)
         else:
             source=TriggeredImageSource(capacity=1)
         self.camera_source=source;self.camera_frames=0;self.camera_passes=0;self.rows=[];self.history.setRowCount(0)
@@ -721,8 +744,9 @@ class MainWindow(QMainWindow):
         self.camera_worker.source=source;self.camera_worker.expected=expected
         self.camera_worker.roi=self.roi;self.camera_worker.roi_mode=roi_mode
         self.camera_worker.eject_settings=eject
-        self.camera_worker.production=(mode=='hikrobot' and not manual_trigger)
+        self.camera_worker.production=(mode=='hikrobot' and not capture_once)
         self.camera_worker.manual_trigger=manual_trigger
+        self.camera_worker.sensor_test=sensor_test
         self.camera_worker.deadline_ms=self.deadline_ms.value()
         self.camera_worker.timeout_ms=int(self.config.get('hardware',{}).get('frame_timeout_ms',100))
         self.source_mode.setEnabled(False);self.connect_camera_button.setEnabled(False)
@@ -740,12 +764,14 @@ class MainWindow(QMainWindow):
             self.stop_live_view()
             return
         if self.worker.isRunning() or self.camera_worker.isRunning():return
-        source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText())
+        source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText(),
+                                 exposure_us=self.exposure_us.value() or None)
         self.live_source=source;self.live_frames=0;self.live_error=False;self.save_operator_settings()
         self.live_worker.source=source
         self.source_mode.setEnabled(False);self.camera_serial.setEnabled(False);self.trigger_line.setEnabled(False)
         self.connect_camera_button.setEnabled(False);self.disconnect_camera_button.setEnabled(False)
         self.test_trigger_button.setEnabled(False);self.trial_trigger_button.setEnabled(False)
+        self.sensor_test_button.setEnabled(False);self.exposure_us.setEnabled(False)
         self.live_button.setText('ĐANG MỞ LIVE…');self.live_button.setEnabled(False)
         self.live_info.setText('Đang mở camera…');self.live_view.set_image(None)
         self.live_worker.start(QThread.Priority.HighPriority)
@@ -764,7 +790,9 @@ class MainWindow(QMainWindow):
         h,w=image.shape[:2];sample=image[::4,::4]
         gray=cv2.cvtColor(sample,cv2.COLOR_BGR2GRAY) if sample.ndim==3 else sample
         brightness=float(gray.mean());sharpness=float(cv2.Laplacian(gray,cv2.CV_64F).var())
-        self.live_info.setText(f'{w} × {h}  ·  Độ nét tương đối {sharpness:.1f}  ·  Độ sáng {brightness:.1f}/255  ·  Frame {self.live_frames}')
+        exposure=metadata.get('exposure_us')
+        exposure_text=f'  ·  Phơi sáng {exposure:g} µs' if exposure is not None else ''
+        self.live_info.setText(f'{w} × {h}  ·  Độ nét {sharpness:.1f}  ·  Độ sáng {brightness:.1f}/255{exposure_text}  ·  Frame {self.live_frames}')
     def live_failed(self,text):
         last=text.strip().splitlines()[-1] if text.strip() else 'Lỗi CAMERA LIVE không xác định'
         self.live_error=True
@@ -802,7 +830,9 @@ class MainWindow(QMainWindow):
             self.camera_state.setText('ĐÃ ARM • CHỜ TRIGGER')
             self.camera_state.setStyleSheet('font-weight:800;color:#087448')
             self.disconnect_camera_button.setEnabled(True)
-            ready_text='CHỜ TRIGGER NGOÀI' if self.camera_worker.production else 'CHỜ ẢNH MÔ PHỎNG'
+            ready_text='CHỜ ẢNH MÔ PHỎNG'
+            if self.camera_worker.production:ready_text='CHỜ TRIGGER NGOÀI'
+            if self.camera_worker.sensor_test:ready_text='CHỜ 1 XUNG CẢM BIẾN'
             self.banner.setText('SẴN SÀNG  ·  '+ready_text)
             self.banner.setStyleSheet('font-size:22px;font-weight:bold;padding:10px;background:#d7f3e4;color:#11663f')
         else:
@@ -824,7 +854,7 @@ class MainWindow(QMainWindow):
         self.disconnect_camera_button.setEnabled(False);self.source_changed()
         if self.camera_frames:
             passes=self.camera_passes
-            label='Đã chụp thử và ngắt camera' if self.camera_worker.manual_trigger else 'Đã ngắt camera'
+            label='Đã chụp thử và ngắt camera' if self.camera_worker.manual_trigger or self.camera_worker.sensor_test else 'Đã ngắt camera'
             self.show_status(f'{label} · {self.camera_frames} frame · {passes} đạt · {self.camera_frames-passes} lỗi')
         elif not self.details.toPlainText():self.show_status('Camera đã ngắt.')
         if self.closing:self.close()

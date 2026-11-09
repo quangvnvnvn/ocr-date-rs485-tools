@@ -107,6 +107,7 @@ class HikrobotMvsSource(FrameSource):
         *,
         sdk: Any | None = None,
         software_test: bool = False,
+        exposure_us: int | None = None,
     ) -> None:
         if trigger_source not in {"Line0", "Line1"}:
             raise ValueError("Ngõ trigger chỉ hỗ trợ Line0 hoặc Line1")
@@ -114,6 +115,8 @@ class HikrobotMvsSource(FrameSource):
         self.trigger_source = trigger_source
         self.sdk = sdk
         self.software_test = software_test
+        self.requested_exposure_us = exposure_us
+        self.exposure_us = None
         self.camera = None
         self.device = None
         self.device_serial = ""
@@ -169,6 +172,24 @@ class HikrobotMvsSource(FrameSource):
                 self.camera.MV_CC_OpenDevice(getattr(self.sdk, "MV_ACCESS_Exclusive", 1), 0),
                 "mở camera",
             )
+            float_value = getattr(self.sdk, "MVCC_FLOATVALUE", None)
+            if float_value is not None:
+                exposure = float_value()
+                exposure_status = self.camera.MV_CC_GetFloatValue("ExposureTime", exposure)
+                if self.requested_exposure_us is not None:
+                    self._ok(exposure_status, "đọc giới hạn phơi sáng")
+                    requested = self.requested_exposure_us
+                    if not exposure.fMin <= requested <= exposure.fMax:
+                        raise FrameSourceError(f'Phơi sáng phải trong khoảng {exposure.fMin:g}–{exposure.fMax:g} µs')
+                    auto_off = int(getattr(self.sdk, "MV_EXPOSURE_AUTO_MODE_OFF", 0))
+                    self._ok(self.camera.MV_CC_SetEnumValue("ExposureAuto", auto_off), "tắt phơi sáng tự động")
+                    self._ok(self.camera.MV_CC_SetFloatValue("ExposureTime", requested), "đặt thời gian phơi sáng")
+                    exposure_status = self.camera.MV_CC_GetFloatValue("ExposureTime", exposure)
+                    self._ok(exposure_status, "đọc phơi sáng sau khi đặt")
+                if int(exposure_status) == int(getattr(self.sdk, "MV_OK", 0)):
+                    self.exposure_us = float(exposure.fCurValue)
+            elif self.requested_exposure_us is not None:
+                raise FrameSourceError("SDK hiện tại không hỗ trợ đặt phơi sáng")
             if int(self.device.nTLayerType) == int(getattr(self.sdk, "MV_GIGE_DEVICE", -1)):
                 packet_size = int(self.camera.MV_CC_GetOptimalPacketSize())
                 if packet_size > 0:
@@ -375,6 +396,7 @@ class HikrobotMvsSource(FrameSource):
                         "pixel_type": int(info.enPixelType),
                         "width": int(info.nWidth),
                         "height": int(info.nHeight),
+                        "exposure_us": self.exposure_us,
                     },
                 )
             finally:
