@@ -13,11 +13,11 @@ original_config=TEST_CONFIG.read_text(encoding='utf-8')
 atexit.register(lambda:TEST_CONFIG.write_text(original_config,encoding='utf-8'))
 app=QApplication([]);w=MainWindow();w.show();app.processEvents()
 w.roi_mode.setCurrentIndex(w.roi_mode.findData('auto'))
-w.date.setDate(QDate(2026,8,22))
+w.trial_date.setDate(QDate(2026,8,22))
 assert w.roi_mode.currentData()=='auto'
 assert w.date.isEnabled()
 assert w.check_date.isChecked()
-assert w.date.date().toString('yyyy-MM-dd')=='2026-08-22'
+assert w.trial_date.date().toString('yyyy-MM-dd')=='2026-08-22'
 a=w.original.rect_image();w.select_roi()
 QTest.mousePress(w.original,Qt.LeftButton,pos=QPoint(int(a.x()+a.width()*.4),int(a.y()+a.height()*.4)))
 QTest.mouseRelease(w.original,Qt.LeftButton,pos=QPoint(int(a.x()+a.width()*.7),int(a.y()+a.height()*.6)))

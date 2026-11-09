@@ -370,7 +370,7 @@ class MainWindow(QMainWindow):
         camera_test_bar.addWidget(self.live_button)
         self.test_trigger_button=QPushButton('CHỤP THỬ 1 ẢNH (TRIGGER TAY)');self.test_trigger_button.clicked.connect(self.test_camera_trigger)
         self.test_trigger_button.setObjectName('primary')
-        self.test_trigger_button.setToolTip('Tự mở camera Hikrobot, chụp một ảnh, chạy OCR rồi ngắt camera. Không kích xi lanh.')
+        self.test_trigger_button.setToolTip('Chụp một ảnh, đối chiếu ngày NSX đặt trong tab Chạy thử rồi ngắt camera. Không kích xi lanh.')
         camera_test_bar.addWidget(self.test_trigger_button)
         self.camera_test_hint=QLabel('Chụp thử không cần tín hiệu ngoài · Không kích xi lanh')
         self.camera_test_hint.setObjectName('subtitle');camera_test_bar.addWidget(self.camera_test_hint);camera_test_bar.addStretch()
@@ -404,6 +404,12 @@ class MainWindow(QMainWindow):
         self.save_config_button.setShortcut('Ctrl+S')
         self.save_config_button.setToolTip('Lưu toàn bộ thiết lập hiện tại để khôi phục khi mở lại (Ctrl+S).')
         self.run_button=button('KIỂM TRA OCR',self.run_image);self.run_button.setObjectName('primary')
+        trial_settings=QHBoxLayout();function_block(trial,'inspectionBlock').addLayout(trial_settings)
+        trial_settings.addWidget(QLabel('Ngày NSX cần đối chiếu khi chạy thử:'))
+        self.trial_date=QDateEdit();self.trial_date.setCalendarPopup(True);self.trial_date.setDisplayFormat('dd/MM/yyyy')
+        trial_settings.addWidget(self.trial_date)
+        trial_save=button('Lưu ngày thử',self.save_configuration,trial_settings)
+        trial_save.setObjectName('saveSettings');trial_settings.addStretch()
         settings=QHBoxLayout();function_block(configuration,'ocrBlock').addLayout(settings)
         settings.addWidget(QLabel('Mã AB cần kiểm tra:'));self.ab=QLineEdit('12');self.ab.setMaximumWidth(65);self.ab.setMaxLength(2)
         self.ab.setValidator(QRegularExpressionValidator(QRegularExpression('[0-9]{2}')));settings.addWidget(self.ab)
@@ -491,7 +497,7 @@ class MainWindow(QMainWindow):
         self.image_split.setSizes([850,350] if index==0 else [580,620])
         self.mode_tabs.updateGeometry()
     def lock_inspection_settings(self,locked):
-        for widget in (self.date,self.ab,self.dm,self.threshold,self.max_angle,self.roi_mode):
+        for widget in (self.date,self.trial_date,self.ab,self.dm,self.threshold,self.max_angle,self.roi_mode):
             widget.setEnabled(not locked)
     def operator_tab_changed(self,index):
         self.update_operator_layout(index)
@@ -520,6 +526,8 @@ class MainWindow(QMainWindow):
             if parsed.isValid():self.date.setDate(parsed)
         else:
             self.date.setDate(QDate(2026,8,22))
+        trial_date=QDate.fromString(self.config.get('trial_expected_date') or '', 'yyyy-MM-dd')
+        self.trial_date.setDate(trial_date if trial_date.isValid() else self.date.date())
         mode=self.roi_mode.findData(self.config.get('roi_mode','auto'))
         self.roi_mode.setCurrentIndex(mode if mode>=0 else 0)
         hardware=self.config.get('hardware',{})
@@ -537,6 +545,7 @@ class MainWindow(QMainWindow):
         self.eject_pulse.setValue(float(eject.get('pulse_ms',100)))
     def save_operator_settings(self):
         self.config['operator_tab']=self.mode_tabs.currentIndex()
+        self.config['trial_expected_date']=self.trial_date.date().toString('yyyy-MM-dd')
         self.config['roi_mode']=self.roi_mode.currentData()
         self.config['inspection']={'expected_ab':self.ab.text(),'expected_dm':int(self.dm.currentText()),
             'minimum_confidence':self.threshold.value(),'check_nsx_date':True,
@@ -636,13 +645,14 @@ class MainWindow(QMainWindow):
         self.begin([(ROOT/'data/test_images'/name,FixedROI.from_dict(value) if mode=='fixed' else None,mode) for name,value in self.manifest.items()])
     def run_image(self):
         if self.path:self.begin([(self.path,self.roi,self.roi_mode.currentData())])
-    def current_expected(self):
+    def current_expected(self,*,trial=False):
+        date=self.trial_date if trial else self.date
         return Expected(self.ab.text(),int(self.dm.currentText()),self.threshold.value(),
-            check_nsx_date=True,expected_date=self.date.date().toPython(),
+            check_nsx_date=True,expected_date=date.date().toPython(),
             maximum_angle_deviation=self.max_angle.value())
     def begin(self,jobs):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or not jobs:return
-        try:expected=self.current_expected()
+        try:expected=self.current_expected(trial=True)
         except ValueError as exc:return QMessageBox.warning(self,'Kiểm tra thiết lập',str(exc))
         if any(mode=='fixed' and roi is None for _,roi,mode in jobs):return QMessageBox.warning(self,'Thiếu ROI','Hãy khoanh vùng DATE trước khi kiểm tra.')
         self.save_operator_settings()
@@ -655,7 +665,7 @@ class MainWindow(QMainWindow):
         mode='hikrobot' if manual_trigger else self.source_mode.currentData()
         if mode not in ('hikrobot','simulation'):
             return QMessageBox.information(self,'Nguồn ảnh','Hãy chọn camera Hikrobot hoặc mô phỏng trigger.')
-        try:expected=self.current_expected()
+        try:expected=self.current_expected(trial=manual_trigger or mode=='simulation')
         except ValueError as exc:return QMessageBox.warning(self,'Kiểm tra thiết lập',str(exc))
         try:
             eject=self.current_eject_settings()
@@ -761,7 +771,8 @@ class MainWindow(QMainWindow):
     def camera_armed(self,info):
         ready=bool(info.get('ready'))
         if ready:
-            self.production_state.setText(f'ĐÃ ARM · NSX {self.date.date().toString("dd/MM/yyyy")} · AB {self.ab.text()} · DM {self.dm.currentText()}')
+            if self.camera_worker.production:
+                self.production_state.setText(f'ĐÃ ARM · NSX {self.date.date().toString("dd/MM/yyyy")} · AB {self.ab.text()} · DM {self.dm.currentText()}')
             self.camera_state.setText('ĐÃ ARM • CHỜ TRIGGER')
             self.camera_state.setStyleSheet('font-weight:800;color:#087448')
             self.disconnect_camera_button.setEnabled(True)
@@ -986,7 +997,7 @@ def main():
         window.source_mode.setCurrentIndex(window.source_mode.findData('simulation'))
         window.roi_mode.setCurrentIndex(window.roi_mode.findData('auto'))
         window.ab.setText('12');window.dm.setCurrentText('1');window.threshold.setValue(.70)
-        window.max_angle.setValue(3.0);window.date.setDate(QDate(2026,8,22))
+        window.max_angle.setValue(3.0);window.trial_date.setDate(QDate(2026,8,22))
         def smoke_armed(info):
             if info.get('ready') and state['report'] is None:QTimer.singleShot(0,window.simulate_trigger)
         def smoke_result(report,folder,artifacts):

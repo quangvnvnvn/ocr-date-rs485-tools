@@ -23,7 +23,7 @@ app=QApplication([])
 window=MainWindow();window.show();app.processEvents()
 window.roi_mode.setCurrentIndex(window.roi_mode.findData('auto'))
 window.ab.setText('13');window.dm.setCurrentText('1');window.threshold.setValue(.70)
-window.max_angle.setValue(3.0);window.date.setDate(QDate(2026,8,22))
+window.max_angle.setValue(3.0);window.trial_date.setDate(QDate(2026,8,22))
 data=ROOT/'data/validation/testdate_20260906'
 truth=json.loads((data/'manifest.json').read_text(encoding='utf-8'))
 jobs=[(data/name,None,'auto') for name in truth]

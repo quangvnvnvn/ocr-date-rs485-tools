@@ -26,7 +26,7 @@ window.source_mode.setCurrentIndex(window.source_mode.findData("simulation"))
 window.roi_mode.setCurrentIndex(window.roi_mode.findData("auto"))
 window.ab.setText("12"); window.dm.setCurrentText("1")
 window.threshold.setValue(.70); window.max_angle.setValue(3.0)
-window.date.setDate(QDate(2026, 8, 22))
+window.trial_date.setDate(QDate(2026, 8, 22))
 state = {"armed": False, "result": None}
 
 
