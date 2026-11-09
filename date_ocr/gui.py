@@ -336,14 +336,15 @@ class MainWindow(QMainWindow):
         top.setContentsMargins(12,10,12,10);top.setSpacing(8);layout.addWidget(self.controls)
         self.mode_tabs=QTabWidget();self.mode_tabs.setObjectName('operatorModes');self.mode_tabs.tabBar().setObjectName('modeBar');top.addWidget(self.mode_tabs)
         pages=[]
-        for name,identity in zip(('Chạy thật','Chạy thử','Test chức năng','Cài đặt'),('productionPage','trialPage','diagnosticsPage','settingsPage')):
+        for name,identity in zip(('Chạy thật','Chạy thử','Test chức năng','Cài đặt','Camera Live'),('productionPage','trialPage','diagnosticsPage','settingsPage','livePage')):
             page=QWidget();page.setObjectName(identity);page_layout=QVBoxLayout(page);page_layout.setSpacing(8)
             self.mode_tabs.addTab(page,name);pages.append(page_layout)
         def function_block(parent,identity):
             block=QWidget();block.setObjectName(identity)
             content=QVBoxLayout(block);content.setContentsMargins(8,6,8,6);content.setSpacing(6)
             parent.addWidget(block);return content
-        production,trial,diagnostics,configuration=pages
+        production,trial,diagnostics,configuration,live=pages
+        self.live_page=self.mode_tabs.widget(self.mode_tabs.count()-1)
         production.addWidget(QLabel('Sản xuất · Camera Hikrobot nhận trigger ngoài, xử lý và đẩy NG theo cấu hình.'))
         trial.addWidget(QLabel('Kiểm tra ảnh / thư mục · Không phát tín hiệu đẩy sản phẩm.'))
         diagnostics.addWidget(QLabel('Kiểm tra camera, RS485 và xi lanh · TEST NG phát một xung DO thật khi bấm.'))
@@ -365,9 +366,13 @@ class MainWindow(QMainWindow):
         camera_bar.addStretch()
         camera_test_bar=QHBoxLayout();function_block(diagnostics,'cameraBlock').addLayout(camera_test_bar)
         self.camera_test_label=QLabel('Chỉnh / kiểm tra camera:');camera_test_bar.addWidget(self.camera_test_label)
-        self.live_button=QPushButton('CAMERA LIVE');self.live_button.clicked.connect(self.toggle_live_view)
+        live_bar=QHBoxLayout();function_block(live,'cameraBlock').addLayout(live_bar)
+        self.live_button=QPushButton('BẬT LIVE');self.live_button.clicked.connect(self.toggle_live_view)
+        self.live_button.setObjectName('primary')
         self.live_button.setToolTip('Xem hình liên tục để chỉnh lens. Dừng LIVE sẽ tự khôi phục trigger ngoài.')
-        camera_test_bar.addWidget(self.live_button)
+        live_bar.addWidget(self.live_button)
+        self.live_info=QLabel('Bấm BẬT LIVE để xem hình và chỉnh camera.');self.live_info.setWordWrap(True)
+        live_bar.addWidget(self.live_info,1)
         self.test_trigger_button=QPushButton('CHỤP THỬ 1 ẢNH (TRIGGER TAY)');self.test_trigger_button.clicked.connect(self.test_camera_trigger)
         self.test_trigger_button.setObjectName('primary')
         self.test_trigger_button.setToolTip('Chụp một ảnh, đối chiếu NSX, AB và DM trong tab Chạy thử rồi ngắt camera. Không kích xi lanh.')
@@ -473,6 +478,7 @@ class MainWindow(QMainWindow):
         self.details=QTextEdit();self.details.setReadOnly(True);self.details.setFixedHeight(145)
         self.details.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);rl.addWidget(self.details)
         split.addWidget(right);split.setSizes([580,620])
+        self.live_view=ImageView();layout.addWidget(self.live_view,1)
         self.history=QTableWidget(0,9);self.history.setHorizontalHeaderLabels(['Ảnh','Ngày sản xuất','DM','AB','Giờ in','Độ tin cậy','Lệch góc','Xử lý','Kết quả'])
         self.history.setAlternatingRowColors(True);self.history.verticalHeader().hide();self.history.verticalHeader().setDefaultSectionSize(30)
         self.history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.history.setFixedHeight(190)
@@ -490,7 +496,7 @@ class MainWindow(QMainWindow):
         self.load_path(startup)
         self.roi_mode_changed()
         self.source_changed()
-        self.mode_tabs.setCurrentIndex(int(self.config.get('operator_tab',0 if self.source_mode.currentData()=='hikrobot' else 1)) % 4)
+        self.mode_tabs.setCurrentIndex(int(self.config.get('operator_tab',0 if self.source_mode.currentData()=='hikrobot' else 1)) % self.mode_tabs.count())
         self.mode_tabs.currentChanged.connect(self.operator_tab_changed)
         self.operator_tab_changed(self.mode_tabs.currentIndex())
     def update_operator_layout(self,index):
@@ -498,7 +504,11 @@ class MainWindow(QMainWindow):
             self.mode_tabs.widget(i).setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Preferred if i==index else QSizePolicy.Ignored)
         self.mode_tabs.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Maximum)
         self.mode_tabs.setFixedHeight(self.mode_tabs.widget(index).layout().sizeHint().height()+self.mode_tabs.tabBar().sizeHint().height()+12)
-        self.history.setVisible(index!=0)
+        live_selected=self.mode_tabs.widget(index)==self.live_page
+        self.live_view.setVisible(live_selected)
+        self.path_label.setVisible(not live_selected)
+        self.image_split.setVisible(not live_selected)
+        self.history.setVisible(index!=0 and not live_selected)
         self.image_split.setSizes([850,350] if index==0 else [580,620])
         self.mode_tabs.updateGeometry()
     def lock_inspection_settings(self,locked):
@@ -507,6 +517,8 @@ class MainWindow(QMainWindow):
             widget.setEnabled(not locked)
     def operator_tab_changed(self,index):
         self.update_operator_layout(index)
+        if self.live_worker.isRunning() and self.mode_tabs.widget(index)!=self.live_page:
+            self.stop_live_view()
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
         if index in (0,1):
             self.source_mode.setCurrentIndex(self.source_mode.findData('hikrobot' if index==0 else 'static'))
@@ -598,9 +610,11 @@ class MainWindow(QMainWindow):
         self.trigger_line.setEnabled(mode=='hikrobot' and not running)
         self.connect_camera_button.setEnabled(hardware and not running)
         self.disconnect_camera_button.setEnabled(camera_running)
-        self.live_button.setVisible(mode=='hikrobot')
-        self.live_button.setText('DỪNG LIVE' if live_running else 'CAMERA LIVE')
-        self.live_button.setEnabled(mode=='hikrobot' and not camera_running and not test_running)
+        if not live_running:
+            self.live_button.setText('BẬT LIVE')
+            self.live_button.setEnabled(not camera_running and not test_running)
+            self.live_button.setToolTip('Ngắt phiên camera hoặc dừng test xi lanh trước khi bật Live.'
+                                        if camera_running or test_running else 'Xem hình trực tiếp để chỉnh nét và ánh sáng.')
         self.test_trigger_button.setEnabled(not running)
         self.open_button.setEnabled(not running)
         self.sample_button.setEnabled(not running)
@@ -718,48 +732,44 @@ class MainWindow(QMainWindow):
     def toggle_live_view(self):
         if self.eject_test_worker.isRunning():return
         if self.live_worker.isRunning():
-            self.live_worker.requestInterruption();self.live_button.setEnabled(False)
-            self.show_status('Đang dừng CAMERA LIVE và khôi phục trigger cứng…')
+            self.stop_live_view()
             return
         if self.worker.isRunning() or self.camera_worker.isRunning():return
-        if self.source_mode.currentData()!='hikrobot':
-            return QMessageBox.information(self,'CAMERA LIVE','Hãy chọn Camera Hikrobot · trigger ngoài.')
         source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText())
-        self.live_source=source;self.live_frames=0;self.save_operator_settings()
+        self.live_source=source;self.live_frames=0;self.live_error=False;self.save_operator_settings()
         self.live_worker.source=source
         self.source_mode.setEnabled(False);self.camera_serial.setEnabled(False);self.trigger_line.setEnabled(False)
         self.connect_camera_button.setEnabled(False);self.disconnect_camera_button.setEnabled(False)
         self.test_trigger_button.setEnabled(False);self.live_button.setText('ĐANG MỞ LIVE…');self.live_button.setEnabled(False)
-        self.banner.setText('CAMERA LIVE  ·  CHỈNH LENS')
-        self.banner.setStyleSheet('font-size:22px;font-weight:bold;padding:10px;background:#dceeff;color:#075d91')
-        self.debug_text.clear()
-        for view in self.views.values():view.set_image(None)
-        self.details.setHtml('<p><b>CAMERA LIVE không chạy OCR.</b></p><p>Xoay vòng lấy nét đến khi chỉ số <b>Độ nét tương đối</b> đạt giá trị lớn nhất. Chỉnh ánh sáng/khẩu độ để độ sáng không quá tối hoặc cháy trắng.</p>')
+        self.live_info.setText('Đang mở camera…');self.live_view.set_image(None)
         self.live_worker.start(QThread.Priority.HighPriority)
+    def stop_live_view(self):
+        self.live_worker.requestInterruption();self.live_button.setEnabled(False)
+        self.live_button.setText('ĐANG DỪNG…')
+        self.show_status('Đang dừng CAMERA LIVE và khôi phục trigger cứng…')
     def live_armed(self,info):
-        if info.get('ready'):
+        if info.get('ready') and not self.live_worker.isInterruptionRequested():
             self.camera_state.setText('CAMERA LIVE')
             self.camera_state.setStyleSheet('font-weight:800;color:#0874a8')
             self.live_button.setText('DỪNG LIVE');self.live_button.setEnabled(True)
     def got_live_frame(self,image,metadata):
-        self.live_frames+=1;self.original.set_image(image,None)
+        if self.live_worker.isInterruptionRequested() or self.live_error:return
+        self.live_frames+=1;self.live_view.set_image(image)
         h,w=image.shape[:2];sample=image[::4,::4]
         gray=cv2.cvtColor(sample,cv2.COLOR_BGR2GRAY) if sample.ndim==3 else sample
         brightness=float(gray.mean());sharpness=float(cv2.Laplacian(gray,cv2.CV_64F).var())
-        self.path_label.setText(f'CAMERA LIVE • {w} × {h} • Frame {self.live_frames}')
-        self.details.setHtml(f'<p><b>Độ nét tương đối: {sharpness:.1f}</b> &nbsp; | &nbsp; Độ sáng: {brightness:.1f}/255</p><p>Xoay lens để độ nét tăng cao nhất. Bấm <b>DỪNG LIVE</b> trước khi chạy trigger sản xuất.</p>')
-        self.show_status(f'CAMERA LIVE • {w}×{h} • Độ nét {sharpness:.1f} • Độ sáng {brightness:.1f}/255')
+        self.live_info.setText(f'{w} × {h}  ·  Độ nét tương đối {sharpness:.1f}  ·  Độ sáng {brightness:.1f}/255  ·  Frame {self.live_frames}')
     def live_failed(self,text):
         last=text.strip().splitlines()[-1] if text.strip() else 'Lỗi CAMERA LIVE không xác định'
-        self.banner.setText('LỖI CAMERA LIVE / SDK')
-        self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:#ffe0df;color:#a72525')
-        self.details.setPlainText(text);self.show_status(last)
+        self.live_error=True
+        self.live_info.setText('Lỗi Camera Live · '+last);self.show_status(last)
     def live_finished(self):
         self.source_mode.setEnabled(True);self.live_source=None
-        self.original.set_image(self.image,self.roi)
-        self.path_label.setText('Ảnh đang mở: '+self.path.name if self.path else 'Chọn ảnh để bắt đầu')
+        self.operator_tab_changed(self.mode_tabs.currentIndex())
         self.source_changed()
-        if self.live_frames:self.show_status(f'Đã dừng CAMERA LIVE • {self.live_frames} frame xem trước • Đã khôi phục {self.trigger_line.currentText()}')
+        if not self.live_error:
+            self.live_info.setText(f'Đã dừng Live · {self.live_frames} khung hình đã xem.')
+            self.show_status(f'Đã dừng Camera Live · Đã khôi phục {self.trigger_line.currentText()}')
         if self.closing:self.close()
     def disconnect_camera(self):
         if self.camera_worker.isRunning():

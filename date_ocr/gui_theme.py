@@ -40,6 +40,7 @@ QWidget#productionPage {background:#f1f9f5;}
 QWidget#trialPage {background:#eef6ff;}
 QWidget#diagnosticsPage {background:#fff8eb;}
 QWidget#settingsPage {background:#f5f2fc;}
+QWidget#livePage {background:#eef6ff;}
 QWidget#cameraBlock, QWidget#inspectionBlock {background:#dfedff;border:1px solid #a9c9ef;border-radius:7px;}
 QWidget#rs485Block {background:#fff0d2;border:1px solid #e4bd73;border-radius:7px;}
 QWidget#ocrBlock {background:#eae3fa;border:1px solid #c4afea;border-radius:7px;}

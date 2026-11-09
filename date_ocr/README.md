@@ -96,9 +96,9 @@ truyền --model-directory để chỉ thư mục model khác. Đây chưa phả
 4. Phần mềm nạp nóng OCR và AUTO ROI trước, sau đó mới báo
    **ĐÃ ARM · CHỜ TRIGGER**. Mỗi tín hiệu ngoài tạo một frame và tự chạy kiểm tra;
    không cần bấm **KIỂM TRA OCR**.
-5. Dùng **CAMERA LIVE** để chỉnh lens/exposure; khi dừng LIVE phần mềm tự
-   khôi phục trigger ngoài. Nút **TRIGGER TEST (SOFTWARE)** chỉ phát một frame
-   chẩn đoán rồi trả camera về Line0/Line1. Chế độ sản xuất không tự phát trigger.
+5. Khi camera đang rảnh, vào tab **Camera Live** và bấm **BẬT LIVE**. Xem hình,
+   độ nét tương đối và độ sáng trong lúc chỉnh ống kính hoặc đèn. Bấm **DỪNG LIVE**
+   hoặc chuyển tab để khôi phục ngõ trigger ngoài đã cài.
 
 Mỗi frame lưu số frame của SDK. Nếu số thứ tự nhảy cóc, frame hiện tại bị đánh
 `FAIL_FRAME_GAP`; phần mềm không bỏ qua mất ảnh rồi báo PASS. Mô phỏng dùng đúng một

@@ -17,7 +17,8 @@ CAI TREN MAY GAN CAMERA
    Thu muc nay phai chua MvCameraControl_class.py.
 5. Mo OCR_DATE.exe, chon "Camera Hikrobot - trigger ngoai", nhap serial (co the
    de trong neu chi co mot camera), chon Line0/Line1 va bam KET NOI + ARM.
-6. Dung CAMERA LIVE de chinh lens/exposure, sau do DUNG LIVE de khoi phuc trigger.
+6. Vao tab Camera Live va bam BAT LIVE de chinh lens/den. Bam DUNG LIVE hoac
+   chuyen tab de khoi phuc trigger ngoai.
 7. Chi khi man hinh bao "DA ARM - CHO TRIGGER" moi cho may chay.
 
 AN TOAN DU LIEU
