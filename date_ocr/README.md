@@ -16,6 +16,11 @@ một xung ở Line0/Line1 trong tối đa 15 giây. Trong **Cài đặt**, mụ
 dùng đơn vị µs và được áp dụng khi mở camera. Chọn **Theo camera** để dùng giá trị
 đang có trên thiết bị. Tab Camera Live hiển thị giá trị đọc được khi mở camera.
 
+AUTO ROI dùng mẫu hiệu chuẩn riêng khi serial camera khớp với
+`config/camera_calibration/reference.json`. Thư mục này chứa ảnh mẫu
+`reference.png`, vùng tìm mã và vùng chữ in cần bỏ qua khi khớp đặc trưng.
+Khi chuyển máy và vẫn dùng cùng trạm, sao chép cả thư mục hiệu chuẩn.
+
 ## Chế độ quyết định 100 ms
 
 Luồng mặc định dùng ONNX Runtime CPU 4 luồng, không cần GPU rời/CUDA/PyTorch,

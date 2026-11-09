@@ -23,13 +23,15 @@ class AutoROIDetector:
     reviewed reference image, then a RANSAC homography projects the saved DATE box.
     """
     def __init__(self, reference_image, reference_roi, *, min_inliers=35,
-                 min_inlier_ratio=.20, ratio_test=.72, working_max_dimension=600):
+                 min_inlier_ratio=.20, ratio_test=.72, working_max_dimension=600,
+                 padding=(.03,.05),feature_exclusion=None):
         self.reference_path=Path(reference_image)
         self.reference_roi=reference_roi
         self.min_inliers=min_inliers
         self.min_inlier_ratio=min_inlier_ratio
         self.ratio_test=ratio_test
         self.working_max_dimension=working_max_dimension
+        self.padding=padding
         try:
             reference=cv2.imdecode(np.fromfile(str(self.reference_path),dtype=np.uint8),cv2.IMREAD_GRAYSCALE)
         except (OSError,ValueError):
@@ -42,7 +44,12 @@ class AutoROIDetector:
                                    fy=self.reference_scale,interpolation=cv2.INTER_AREA)
         self.orb=cv2.ORB_create(nfeatures=1000,scaleFactor=1.2,nlevels=8,
                                 edgeThreshold=19,fastThreshold=12)
-        self.reference_keypoints,self.reference_descriptors=self.orb.detectAndCompute(reference_small,None)
+        mask=None
+        if feature_exclusion is not None:
+            x,y,w,h=(round(value*self.reference_scale) for value in feature_exclusion.bounds(reference.shape))
+            mask=np.full(reference_small.shape,255,np.uint8)
+            mask[y:y+h,x:x+w]=0
+        self.reference_keypoints,self.reference_descriptors=self.orb.detectAndCompute(reference_small,mask)
         if self.reference_descriptors is None or len(self.reference_keypoints)<self.min_inliers:
             raise ValueError('AUTO ROI reference has too few product features')
         self.matcher=cv2.BFMatcher(cv2.NORM_HAMMING)
@@ -88,7 +95,7 @@ class AutoROIDetector:
         if not (.015<=area/image_area<=.12 and 1.7<=aspect<=4.5):
             return AutoROIResult(False,None,0.,inliers,'Hình học vùng DATE không phù hợp')
         xx,yy,ww,hh=cv2.boundingRect(projected)
-        margin_x=round(ww*.03);margin_y=round(hh*.05)
+        margin_x=round(ww*self.padding[0]);margin_y=round(hh*self.padding[1])
         xx=max(0,xx-margin_x);yy=max(0,yy-margin_y)
         right=min(gray.shape[1],xx+ww+2*margin_x)
         bottom=min(gray.shape[0],yy+hh+2*margin_y)

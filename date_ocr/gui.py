@@ -655,6 +655,7 @@ class MainWindow(QMainWindow):
         if fixed:self.update_roi()
         else:
             self.coords.setText('AUTO ROI sẽ tự bám theo mẫu bao bì khi kiểm tra')
+            self.original.roi=None;self.original.update()
             self.show_status('AUTO ROI đang bật • Không cần khoanh vùng bằng tay')
     def toggle_debug(self,enabled):
         for index in range(2,self.tabs.count()):self.tabs.setTabVisible(index,enabled)
@@ -673,8 +674,9 @@ class MainWindow(QMainWindow):
         if self.roi:
             x,y,w,h=self.roi.bounds(self.image.shape);self.coords.setText(f'Vùng DATE: {w} × {h} px  ·  X {x} / Y {y}')
         else:self.coords.setText('Chưa chọn vùng DATE')
-        self.original.roi=self.roi;self.original.update()
-        if self.roi and self.image is not None:self.views['roi'].set_image(self.roi.crop(self.image))
+        display_roi=self.roi if self.roi_mode.currentData()=='fixed' else None
+        self.original.roi=display_roi;self.original.update()
+        if display_roi and self.image is not None:self.views['roi'].set_image(display_roi.crop(self.image))
     def roi_selected(self,roi):self.roi=roi;self.clear_result();self.update_roi();self.show_status('Đã chọn ROI. Bấm LƯU CẤU HÌNH để dùng lần sau.')
     def select_roi(self):
         if self.image is not None:self.original.selecting=True;self.original.setCursor(Qt.CrossCursor);self.show_status('Kéo chuột bao quanh đúng hai dòng DATE trên ảnh gốc.')
@@ -959,14 +961,14 @@ class MainWindow(QMainWindow):
             self.path_label.setText(f'Frame camera: {report["image"]}');self.path_label.setToolTip(report['source'])
         else:
             self.path=Path(report['source']);self.path_label.setText('Ảnh đang xem: '+self.path.name);self.path_label.setToolTip(str(self.path))
-        if artifacts and artifacts.get('original') is not None:
-            self.image=artifacts['original']
-            bbox=report.get('bbox');display_roi=FixedROI(*bbox,self.image.shape[1],self.image.shape[0]) if bbox else self.roi
+        record_image=artifacts.get('original') if artifacts else None
+        if record_image is None and (folder/'original.png').exists():
+            record_image=load_image(folder/'original.png')
+        if record_image is not None:
+            self.image=record_image
+            bbox=report.get('bbox')
+            display_roi=FixedROI(*bbox,self.image.shape[1],self.image.shape[0]) if bbox else None
             self.original.set_image(self.image,display_roi)
-        elif (folder/'original.png').exists():
-            self.image=load_image(folder/'original.png')
-            bbox=report.get('bbox');self.roi=FixedROI(*bbox,self.image.shape[1],self.image.shape[0]) if bbox else None
-            self.original.set_image(self.image,self.roi);self.update_roi()
         elif report.get('production'):
             self.original.set_image(None)
         for name,view in self.views.items():

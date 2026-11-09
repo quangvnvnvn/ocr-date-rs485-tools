@@ -24,6 +24,8 @@ class InspectionRuntime:
     def __init__(self) -> None:
         self.engine = None
         self.auto_detector = None
+        self.camera_detector = None
+        self.calibrated_serial = None
 
     def prepare(self, require_auto_roi: bool = False, status=None) -> None:
         if self.engine is None:
@@ -39,6 +41,24 @@ class InspectionRuntime:
             self.auto_detector = AutoROIDetector(
                 ROOT / "data/test_images/date1.jpg", reference_roi
             )
+            calibration = ROOT / "config/camera_calibration"
+            manifest_path = calibration / "reference.json"
+            if manifest_path.is_file():
+                try:
+                    reference = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    serial = reference["serial_number"]
+                    if not isinstance(serial, str) or not serial:
+                        raise ValueError("Thiếu serial camera")
+                    self.camera_detector = AutoROIDetector(
+                        calibration / "reference.png",
+                        FixedROI.from_dict(reference["roi"]),
+                        padding=(0,0),
+                        feature_exclusion=FixedROI.from_dict(reference["printed_date"]),
+                    )
+                    self.calibrated_serial = serial
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    if status:
+                        status(f"Không tải được mẫu AUTO của camera: {exc}")
 
     def inspect(
         self,
@@ -68,6 +88,7 @@ class InspectionRuntime:
             gc.disable()
         try:
             auto_result = None
+            camera_match = False
             auto_ms = 0.0
             alignment_image = None
             alignment_height = None
@@ -75,9 +96,19 @@ class InspectionRuntime:
                 if self.auto_detector is None:
                     raise RuntimeError("AUTO ROI chưa được nạp nóng")
                 auto_started = time.perf_counter()
-                auto_result = self.auto_detector.detect(image)
+                if (self.camera_detector is not None and metadata
+                        and metadata.get("provider") == "hikrobot_mvs"
+                        and metadata.get("serial_number") == self.calibrated_serial):
+                    auto_result = self.camera_detector.detect(image)
+                    camera_match = auto_result.found
+                if not camera_match:
+                    auto_result = self.auto_detector.detect(image)
                 auto_ms = (time.perf_counter() - auto_started) * 1000
-                if auto_result.found:
+                if camera_match:
+                    inspection_image = image
+                    ih, iw = image.shape[:2]
+                    roi = FixedROI(*auto_result.bbox, iw, ih)
+                elif auto_result.found:
                     inspection_image = self.auto_detector.rectify(image, auto_result)
                     if check_alignment:
                         alignment_image = self.auto_detector.rectify(
@@ -93,7 +124,7 @@ class InspectionRuntime:
                 inspection_image = image
 
             report, artifacts = inspect_image(inspection_image, roi, self.engine, expected, deadline_ms)
-            if roi_mode == "fixed" and roi is not None:
+            if (roi_mode == "fixed" or camera_match) and roi is not None:
                 refined = False
                 for _ in range(2):
                     if report["validation"]["result"] != "FAIL_ROI_NOT_FOUND" or "roi" not in artifacts:
@@ -177,13 +208,14 @@ class InspectionRuntime:
                 )
             report["roi_mode"] = roi_mode
             if auto_result:
-                if auto_result.found:
+                if auto_result.found and not camera_match:
                     report["bbox"] = auto_result.bbox
                 report["auto_roi"] = dict(
                     found=auto_result.found,
                     bbox=auto_result.bbox,
                     quad=auto_result.quad,
-                    rectified=auto_result.found,
+                    rectified=auto_result.found and not camera_match,
+                    reference="camera_calibration" if camera_match else "sample",
                     confidence=auto_result.confidence,
                     inliers=auto_result.inliers,
                     message=auto_result.message,

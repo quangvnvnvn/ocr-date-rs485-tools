@@ -7,6 +7,7 @@ date_ocr/data/models/
 date_ocr/data/logs/
 date_ocr/data/validation/
 date_ocr/config/config.json
+date_ocr/config/camera_calibration/
 date_ocr/packaging_cpu/
 date_ocr/packaging_onnx/
 date_ocr/release_build/
