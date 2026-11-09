@@ -23,7 +23,7 @@ def choose_candidate(candidates,minimum):
     return selected,len(signatures)>1,score(selected)
 
 
-def inspect_image(image,roi,engine,expected,deadline_ms=100):
+def inspect_image(image,roi,engine,expected,deadline_ms=100,*,prefer_gray=False):
     started=time.perf_counter()
     report={'candidates':[], 'ocr_device':str(getattr(engine,'device','unknown')),
         'expected':dict(ab=expected.ab,dm=expected.dm,
@@ -49,11 +49,14 @@ def inspect_image(image,roi,engine,expected,deadline_ms=100):
         report.update(metrics=metrics,field_boxes=fields)
         stage=time.perf_counter()
         if hasattr(engine,'read_fields_fast'):
-            numeric_variant=metrics['numeric_variant']
+            numeric_variant='gray' if prefer_gray else metrics['numeric_variant']
+            dm_variant='gray' if prefer_gray else metrics['dm_variant']
             padding,gap=(2,12) if numeric_variant=='gray' else (6,18)
+            if prefer_gray:
+                padding=6
             readings={field:asdict(value) for field,value in
                       engine.read_fields_fast(variants['gray'],fields,variants[numeric_variant],
-                                              variants['otsu'],variants[metrics['dm_variant']],
+                                              variants['otsu'],variants[dm_variant],
                                               padding,gap).items()}
             report['candidates'].append(dict(name=f'{numeric_variant}_numeric_fast_1pass',
                 image_variant=numeric_variant,

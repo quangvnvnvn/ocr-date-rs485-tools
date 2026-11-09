@@ -12,6 +12,7 @@ import numpy as np
 from main import ROOT
 from ocr.alignment import AlignmentError, fixed_alignment_region, inspect_alignment
 from ocr.pipeline import inspect_image
+from ocr.preprocessing import locate_inkjet_rows
 from ocr.validator import Expected
 from roi.auto_roi import AutoROIDetector
 from roi.fixed_roi import FixedROI
@@ -87,10 +88,29 @@ class InspectionRuntime:
                     roi = None
             else:
                 inspection_image = image
-                if roi is not None:
-                    alignment_image, alignment_height = fixed_alignment_region(image, roi)
 
             report, artifacts = inspect_image(inspection_image, roi, self.engine, expected)
+            if roi_mode == "fixed" and roi is not None:
+                if report["validation"]["result"] == "FAIL_ROI_NOT_FOUND" and "roi" in artifacts:
+                    inner = locate_inkjet_rows(artifacts["roi"])
+                    # Leave at least 60 ms of the frame budget for OCR and alignment.
+                    if inner is not None and time.perf_counter()-decision_started < .040:
+                        x, y, _, _ = report["bbox"]
+                        left, top, width, height = inner
+                        h, w = image.shape[:2]
+                        roi = FixedROI(x+left, y+top, width, height, w, h)
+                        report, artifacts = inspect_image(image, roi, self.engine, expected, prefer_gray=True)
+                        report["refined_fixed_roi"] = True
+                alignment_image, alignment_height = fixed_alignment_region(image, roi)
+                metrics = report.get("metrics")
+                if metrics:
+                    # A large manual ROI can include the entire dark stripe
+                    # or artwork below it. Size the search from the DATE rows
+                    # in that case so it does not skip past the stripe.
+                    text_bottom = metrics["rows"][-1][1]
+                    text_height = text_bottom + round(max(metrics["character_heights"])*.5)
+                    if text_height < alignment_height*.70:
+                        alignment_height = text_height
             report["stage_ms"]["auto_roi"] = round(auto_ms, 2)
             report["ocr_processing_ms"] = report["processing_ms"]
             alignment_started = time.perf_counter()

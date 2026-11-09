@@ -277,8 +277,20 @@ class EasyOCREngine(OCRBase):
         numeric_source=numeric_image.copy()
         left,top,right,bottom=fields['dm']
         numeric_source[top:bottom,left:right]=dm_image[top:bottom,left:right]
-        numeric=self._join_fields(numeric_source,fields,('date','dm','ab','time'),
-                                  trim_names=('date','time'),padding=numeric_padding,
+        ab_left,ab_top,ab_right,ab_bottom=fields['ab']
+        names=('date','dm','ab','time')
+        trim_names=('date','time')
+        if ab_right-ab_left>2*(ab_bottom-ab_top):
+            # A two-digit AB field cannot span this much ink at the calibrated
+            # character size. Keep the lower line intact when the split falls
+            # inside the time, and let the existing CTC pattern check it.
+            _,time_top,time_right,time_bottom=fields['time']
+            fields={**fields,'lower_line':(ab_left,min(ab_top,time_top),
+                                         time_right,max(ab_bottom,time_bottom))}
+            names=('date','dm','lower_line')
+            trim_names=('date','lower_line')
+        numeric=self._join_fields(numeric_source,fields,names,
+                                  trim_names=trim_names,padding=numeric_padding,
                                   gap=numeric_gap)
         numeric_text,numeric_conf=self._recognize_numeric_line(numeric,r'\d{11}:\d{2}')
         result={}

@@ -15,6 +15,38 @@ def runs(mask):
             np.split(indices,np.where(np.diff(indices)>1)[0]+1)]
 
 
+def locate_inkjet_rows(image):
+    """Find a tighter two-line crop within a failed, oversized fixed ROI."""
+    gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY) if image.ndim==3 else image
+    h,w=gray.shape
+    if min(h,w)<64:
+        return None
+    margin=round(w*.10)
+    kernel_size=max(9,round(h*.027))|1
+    kernel=cv2.getStructuringElement(cv2.MORPH_RECT,(kernel_size,kernel_size))
+    local_ink=cv2.morphologyEx(gray[:,margin:w-margin],cv2.MORPH_BLACKHAT,kernel)
+    projection=np.count_nonzero(local_ink>43,axis=1)
+    bands=[(top,bottom,int(projection[top:bottom].sum()))
+           for top,bottom in runs(projection>w*.055)
+           if max(16,h*.05)<=bottom-top<=h*.30]
+    pairs=[]
+    for (top,middle,upper_ink),(lower_top,bottom,lower_ink) in zip(bands,bands[1:]):
+        height=middle-top
+        # The NSX line is longer than the AB/time line. Similar height and
+        # spacing keep package artwork and the dark stripe out of the crop.
+        if (.6*height<=bottom-lower_top<=1.5*height
+                and .15*height<=lower_top-middle<=.9*height
+                and upper_ink>=1.3*lower_ink):
+            pairs.append((top,bottom,height))
+    if len(pairs)!=1:
+        return None
+    top,bottom,height=pairs[0]
+    padding=round(height*.55)
+    top=max(0,top-padding)
+    bottom=min(h,bottom+padding)
+    return margin,top,w-2*margin,bottom-top
+
+
 def estimate_skew(binary):
     """Estimate the inkjet baseline from long text components in about 1 ms.
 
