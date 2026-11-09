@@ -25,24 +25,28 @@ def locate_inkjet_rows(image):
     kernel_size=max(9,round(h*.027))|1
     kernel=cv2.getStructuringElement(cv2.MORPH_RECT,(kernel_size,kernel_size))
     local_ink=cv2.morphologyEx(gray[:,margin:w-margin],cv2.MORPH_BLACKHAT,kernel)
-    projection=np.count_nonzero(local_ink>43,axis=1)
-    bands=[(top,bottom,int(projection[top:bottom].sum()))
-           for top,bottom in runs(projection>w*.055)
-           if max(16,h*.05)<=bottom-top<=h*.30]
-    pairs=[]
-    for (top,middle,upper_ink),(lower_top,bottom,lower_ink) in zip(bands,bands[1:]):
-        height=middle-top
-        # The NSX line is longer than the AB/time line. Similar height and
-        # spacing keep package artwork and the dark stripe out of the crop.
-        if (.6*height<=bottom-lower_top<=1.5*height
-                and .15*height<=lower_top-middle<=.9*height
-                and upper_ink>=1.3*lower_ink):
-            pairs.append((top,bottom,height))
+    thresholds=(43,30) if h<=w*.45 else (43,)
+    for threshold in thresholds:
+        projection=np.count_nonzero(local_ink>threshold,axis=1)
+        bands=[(top,bottom,int(projection[top:bottom].sum()))
+               for top,bottom in runs(projection>w*.055)
+               if max(16,h*.05)<=bottom-top<=h*.30]
+        pairs=[]
+        for (top,middle,upper_ink),(lower_top,bottom,lower_ink) in zip(bands,bands[1:]):
+            height=middle-top
+            # The NSX line is longer than the AB/time line. Similar height and
+            # spacing keep package artwork and the dark stripe out of the crop.
+            if (.6*height<=bottom-lower_top<=1.5*height
+                    and .15*height<=lower_top-middle<=.9*height
+                    and upper_ink>=1.3*lower_ink):
+                pairs.append((top,bottom,height))
+        if pairs:
+            break
     if len(pairs)!=1:
         return None
     top,bottom,height=pairs[0]
     left=margin
-    if np.mean(local_ink[top:top+height,:3]>43)>.35:
+    if np.mean(local_ink[top:top+height,:3]>threshold)>.35:
         # The first glyph reaches the search margin. Leave room for its stroke.
         left=round(w*.06)
     padding=round(height*.55)

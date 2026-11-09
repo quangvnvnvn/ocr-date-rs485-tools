@@ -124,11 +124,21 @@ class InspectionRuntime:
             else:
                 inspection_image = image
 
-            report, artifacts = inspect_image(inspection_image, roi, self.engine, expected, deadline_ms)
+            compact_roi = False
+            if roi_mode == "fixed" and roi is not None and not check_alignment:
+                _, _, width, height = roi.bounds(image.shape)
+                compact_roi = height <= width*.45
+            report, artifacts = inspect_image(
+                inspection_image, roi, self.engine, expected, deadline_ms,
+                allow_unrotated=compact_roi,
+            )
             if (roi_mode == "fixed" or camera_match) and roi is not None:
                 refined = False
                 for _ in range(2):
-                    if report["validation"]["result"] != "FAIL_ROI_NOT_FOUND" or "roi" not in artifacts:
+                    result = report["validation"]["result"]
+                    weak_anchor = (result == "FAIL_OCR_LOW_CONFIDENCE"
+                                   and min(report.get("anchor_confidence", {}).values(), default=1) < .68)
+                    if (result != "FAIL_ROI_NOT_FOUND" and not weak_anchor) or "roi" not in artifacts:
                         break
                     crop = artifacts["roi"]
                     inner = locate_inkjet_rows(crop)
@@ -144,10 +154,19 @@ class InspectionRuntime:
                         break
                     x, y, _, _ = report["bbox"]
                     left, top, width, height = inner
+                    if left_offset:
+                        # A narrower search window must not cut off the DM
+                        # digit. Retain the operator's original right edge.
+                        width = crop.shape[1]-left_offset-left
                     h, w = image.shape[:2]
-                    roi = FixedROI(x+left_offset+left, y+top, width, height, w, h)
-                    report, artifacts = inspect_image(image, roi, self.engine, expected, deadline_ms,
-                                                      prefer_gray=True,allow_unrotated=left_offset>0)
+                    refined_roi = FixedROI(x+left_offset+left, y+top, width, height, w, h)
+                    retry, retry_artifacts = inspect_image(
+                        image, refined_roi, self.engine, expected, deadline_ms,
+                        prefer_gray=True,allow_unrotated=not check_alignment,
+                    )
+                    if weak_anchor and retry["validation"]["result"] == "FAIL_ROI_NOT_FOUND":
+                        break
+                    roi, report, artifacts = refined_roi, retry, retry_artifacts
                     refined = True
                 if refined:
                     report["refined_fixed_roi"] = True

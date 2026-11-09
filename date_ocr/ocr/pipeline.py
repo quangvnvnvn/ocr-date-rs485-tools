@@ -46,6 +46,7 @@ def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,pr
         artifacts['roi']=crop
         stage=time.perf_counter()
         variants,fields,metrics=preprocess(crop,allow_unrotated=allow_unrotated)
+        prefer_gray=prefer_gray or metrics['angle'] is None
         report['stage_ms']['preprocess']=round((time.perf_counter()-stage)*1000,2)
         artifacts.update(variants)
         report.update(metrics=metrics,field_boxes=fields)
