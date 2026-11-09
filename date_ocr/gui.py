@@ -25,6 +25,31 @@ from gui_theme import apply_theme
 from production_log import DailyProductionLog, now_local
 
 
+RESULT_TEXT = {
+    'PASS': ('Đạt', 'Khớp các điều kiện kiểm tra.'),
+    'FAIL_DM': ('Sai mã DM', 'Mã DM đọc được khác mã đã cài.'),
+    'FAIL_AB': ('Sai mã AB', 'Mã AB đọc được khác mã đã cài.'),
+    'FAIL_DATE': ('Ngày in không hợp lệ', 'Ngày sản xuất đọc được không hợp lệ.'),
+    'FAIL_TIME': ('Giờ in không hợp lệ', 'Giờ in đọc được không hợp lệ.'),
+    'FAIL_DATE_MISMATCH': ('Sai ngày sản xuất', 'Ngày sản xuất đọc được khác ngày đã chọn.'),
+    'FAIL_FRAME_GAP': ('Thiếu ảnh từ camera', 'Số thứ tự ảnh bị gián đoạn. Kiểm tra tín hiệu chụp và kết nối camera.'),
+    'FAIL_BUSY': ('Đang xử lý ảnh trước', 'Tín hiệu chụp đến khi ảnh trước còn chờ xử lý.'),
+    'FAIL_OCR_LOW_CONFIDENCE': ('Độ tin cậy thấp', 'Kết quả đọc mã chưa đạt ngưỡng tin cậy đã cài.'),
+    'FAIL_DEADLINE': ('Quá thời gian', 'Thời gian xử lý vượt giới hạn {deadline} ms.'),
+    'FAIL_ROI_NOT_FOUND': ('Chưa tìm thấy vùng mã', 'Không tách được đủ hai dòng mã trong vùng kiểm tra.'),
+    'FAIL_FORMAT': ('Sai định dạng mã', 'Chuỗi đọc được không đúng cấu trúc ngày sản xuất, DM, AB và giờ in.'),
+    'FAIL_OCR': ('Không đọc được mã', 'Xem ảnh và chi tiết OCR để kiểm tra.'),
+}
+
+
+def result_text(report):
+    code=report['validation']['result']
+    title,reason=RESULT_TEXT.get(code,('Lỗi kiểm tra','Xem chi tiết OCR để kiểm tra lỗi.'))
+    if code=='FAIL_ROI_NOT_FOUND' and (report.get('auto_roi') or {}).get('found') is False:
+        return title,'Không bám được mẫu bao bì để xác định vị trí hai dòng mã.'
+    return title,reason.format(deadline=report.get('deadline_ms',DEFAULT_DEADLINE_MS))
+
+
 def optimize_process_priority():
     if sys.platform=='win32':
         try:
@@ -822,7 +847,7 @@ class MainWindow(QMainWindow):
                 packet=self.camera_source.trigger(self.image,self.path.name if self.path else 'current')
                 self.show_status(f'Đã phát trigger thử #{packet.frame_id} • đang xử lý')
         except FrameSourceError as exc:
-            self.banner.setText('KHÔNG ĐẠT  ·  FAIL_BUSY')
+            self.banner.setText('KHÔNG ĐẠT  ·  ĐANG XỬ LÝ ẢNH TRƯỚC')
             self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:#ffe0df;color:#a72525')
             self.show_status(str(exc))
     def camera_armed(self,info):
@@ -943,19 +968,23 @@ class MainWindow(QMainWindow):
         self.camera_passes+=int(report['validation']['result']=='PASS')
         self.show_record(report,folder,artifacts);self.latest_report=report
         mode='TRIGGER TAY' if self.camera_worker.manual_trigger else 'CAMERA ĐÃ ARM'
-        self.show_status(f'{mode} • Frame {self.camera_frames} • {report["validation"]["result"]} • {report.get("processing_ms",0):.1f} ms')
+        title,_=result_text(report)
+        self.show_status(f'{mode} • Ảnh {self.camera_frames} • {title} • {report.get("processing_ms",0):.1f} ms')
     def append_result(self,report,folder):
         if report.get('production') and len(self.rows)>=500:
             self.rows.pop(0);self.history.removeRow(0)
         self.rows.append((report,folder));row=self.history.rowCount();self.history.insertRow(row)
         v=report['validation'];p=v.get('parsed') or {};conf=v.get('overall_confidence')
         date_text=f"{p['day']:02d}/{p['month']:02d}/{p['year']}" if p else '—'
-        values=[report['image'],date_text,p.get('dm','—'),p.get('ab','—'),p.get('time','—'),f'{conf:.2%}' if conf is not None else '—',f'{report.get("processing_ms",0):.1f} ms','ĐẠT' if v['result']=='PASS' else 'LỖI']
+        title,reason=result_text(report)
+        values=[report['image'],date_text,p.get('dm','—'),p.get('ab','—'),p.get('time','—'),f'{conf:.2%}' if conf is not None else '—',f'{report.get("processing_ms",0):.1f} ms',title]
         for col,value in enumerate(values):
             item=QTableWidgetItem(str(value));item.setBackground(QColor('#edf8f1' if v['result']=='PASS' else '#fff0ed'));self.history.setItem(row,col,item)
         self.history.item(row,self.history.columnCount()-1).setForeground(QColor('#117449' if v['result']=='PASS' else '#b32b30'))
+        self.history.item(row,self.history.columnCount()-1).setToolTip(reason)
     def show_record(self,report,folder,artifacts=None):
-        v=report['validation'];ok=v['result']=='PASS';self.banner.setText('ĐẠT  ·  PASS' if ok else 'KHÔNG ĐẠT  ·  '+v['result'])
+        v=report['validation'];ok=v['result']=='PASS';title,reason=result_text(report)
+        self.banner.setText('ĐẠT' if ok else 'KHÔNG ĐẠT  ·  '+title.upper())
         self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:'+('#d7f3e4;color:#11663f' if ok else '#ffe0df;color:#a72525'))
         camera=bool(report.get('hardware'))
         if camera:
@@ -975,36 +1004,27 @@ class MainWindow(QMainWindow):
         for name,view in self.views.items():
             if artifacts is not None:view.set_image(artifacts.get(name))
             else:view.set_image(load_image(folder/(name+'.png')) if (folder/(name+'.png')).exists() else None)
-        lines=[v.get('raw',''),'',f"Kết quả: {v['result']} | {report['processing_ms']} ms",f"Lý do: {v['error_reason']}",f"Confidence: {v.get('confidence',{})}",f"Expected: {report.get('expected',{})}"]
+        lines=[v.get('raw',''),'',f"Kết quả: {title} | {report['processing_ms']} ms",f"Lý do: {reason}",f"Độ tin cậy: {v.get('confidence',{})}",f"Yêu cầu: {report.get('expected',{})}",f"Chẩn đoán kỹ thuật: {v['result']} · {v['error_reason']}"]
         if report.get('auto_roi'):lines.append('AUTO ROI: '+str(report['auto_roi']))
         for c in report.get('candidates',[]):lines.extend(['',c['name']+': '+c['raw'].replace('\n',' / ')])
         self.debug_text.setPlainText('\n'.join(lines))
         p=v.get('parsed') or {};conf=v.get('overall_confidence');expected=report.get('expected',{})
         deadline=report.get('deadline_ms',DEFAULT_DEADLINE_MS)
-        labels={'FAIL_DM':'Mã DM khác với thiết lập.','FAIL_AB':'Mã AB khác với thiết lập.',
-                'FAIL_DATE':'Ngày in không hợp lệ.','FAIL_TIME':'Giờ in không hợp lệ.',
-                'FAIL_DATE_MISMATCH':'Ngày sản xuất khác ngày đã chọn.',
-                'FAIL_FRAME_GAP':'Thiếu frame trigger theo số thứ tự camera. Dừng máy và kiểm tra tốc độ/cáp/buffer.',
-                'FAIL_BUSY':'Trigger đến khi frame trước còn chờ xử lý.',
-                'FAIL_OCR_LOW_CONFIDENCE':'Chữ chưa đủ rõ để xác nhận. Hãy kiểm tra ảnh và vùng DATE.',
-                'FAIL_DEADLINE':f'Kết quả đến trễ hơn giới hạn {deadline} ms.',
-                'FAIL_ROI_NOT_FOUND':'Chưa xác định được đủ hai dòng DATE. Hãy khoanh lại vùng.',
-                'FAIL_FORMAT':'Chữ đọc được không đúng cấu trúc yêu cầu.',
-                'FAIL_OCR':'Không đọc chắc chắn. Xem ảnh hoặc chi tiết OCR.'}
+        expected_date=QDate.fromString(expected.get('expected_date') or '', 'yyyy-MM-dd')
+        expected_day=expected_date.toString('dd/MM/yyyy') if expected_date.isValid() else '—'
         day=f"{p['day']:02d}/{p['month']:02d}/{p['year']}" if p else '—'
         fields=[('NGÀY SẢN XUẤT',day),('DM',p.get('dm','—')),('AB',p.get('ab','—')),('GIỜ IN',p.get('time','—'))]
         cells=''.join(f'<td><span style="color:#60798b;font-size:10px">{key}</span><br><span style="font-size:19px;font-weight:600">{html.escape(str(value))}</span></td>' for key,value in fields)
-        message='Khớp các điều kiện kiểm tra.' if ok else labels.get(v['result'],'Xem chi tiết OCR để kiểm tra lỗi.')
         confidence_text=f'{conf:.2%}' if conf is not None else '—'
         elapsed=report.get('processing_ms',0);timing_color='#117449' if report.get('deadline_met') else '#b32b30'
         late_text=' · QUÁ GIỚI HẠN' if elapsed>deadline else ''
         device_text='GPU CUDA' if str(report.get('ocr_device','')).startswith('cuda') else 'CPU'
         auto=report.get('auto_roi');auto_text=(f' &nbsp; | &nbsp; AUTO ROI: <b>{auto["confidence"]:.1%}</b>' if auto and auto.get('found') else '')
         self.details.setHtml(f'<table width="100%" cellpadding="3"><tr>{cells}</tr></table>'
-            f'<p style="color:#496778">Yêu cầu: NSX <b>{self.date.date().toString("dd/MM/yyyy")}</b> · AB <b>{html.escape(str(expected.get("ab","—")))}</b> · DM <b>{expected.get("dm","—")}</b>'
+            f'<p style="color:{"#117449" if ok else "#b32b30"}">{reason}</p>'
+            f'<p style="color:#496778">Yêu cầu: NSX <b>{expected_day}</b> · AB <b>{html.escape(str(expected.get("ab","—")))}</b> · DM <b>{expected.get("dm","—")}</b>'
             f' &nbsp; | &nbsp; Độ tin cậy: <b>{confidence_text}</b>{auto_text}</p>'
-            f'<p style="color:{timing_color}">Thời gian quyết định: <b>{elapsed:.1f} ms</b> / giới hạn {deadline} ms{late_text} · OCR: <b>{device_text}</b></p>'
-            f'<p style="color:{"#117449" if ok else "#b32b30"}">{message}</p>')
+            f'<p style="color:{timing_color}">Thời gian quyết định: <b>{elapsed:.1f} ms</b> / giới hạn {deadline} ms{late_text} · OCR: <b>{device_text}</b></p>')
     def history_selected(self,row,col):
         if row<len(self.rows):self.show_record(*self.rows[row])
     def failed(self,text):self.banner.setText('LỖI OCR');self.details.setPlainText(text);self.show_status('Có lỗi — xem chi tiết bên phải.')

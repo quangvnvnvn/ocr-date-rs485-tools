@@ -12,7 +12,7 @@ import numpy as np
 from main import ROOT
 from ocr.alignment import AlignmentError, fixed_alignment_region, inspect_alignment
 from ocr.pipeline import DEFAULT_DEADLINE_MS, inspect_image
-from ocr.preprocessing import locate_inkjet_rows
+from ocr.preprocessing import detect_dark_right_edge, locate_inkjet_rows
 from ocr.validator import Expected
 from roi.auto_roi import AutoROIDetector
 from roi.fixed_roi import FixedROI
@@ -141,23 +141,28 @@ class InspectionRuntime:
                     if (result != "FAIL_ROI_NOT_FOUND" and not weak_anchor) or "roi" not in artifacts:
                         break
                     crop = artifacts["roi"]
-                    inner = locate_inkjet_rows(crop)
+                    package_edge = detect_dark_right_edge(crop) if not refined else None
+                    search_crop = crop if package_edge is None else crop[:,:package_edge]
+                    inner = locate_inkjet_rows(search_crop)
                     left_offset = 0
                     if inner is None and not refined and not check_alignment:
                         # On wide conveyor views, package artwork to the left
                         # can hide the two-line projection of the stamp.
-                        left_offset = round(crop.shape[1]*.25)
-                        inner = locate_inkjet_rows(crop[:,left_offset:])
+                        left_offset = round(search_crop.shape[1]*.25)
+                        inner = locate_inkjet_rows(search_crop[:,left_offset:])
                     # Reserve the majority of the frame budget for OCR and alignment.
                     elapsed_ms = (time.perf_counter()-decision_started)*1000
                     if inner is None or elapsed_ms >= deadline_ms*.40:
                         break
                     x, y, _, _ = report["bbox"]
                     left, top, width, height = inner
-                    if left_offset:
+                    if package_edge is not None and not left_offset:
+                        # The NSX anchor can be close to the original left edge.
+                        left, width = 0, package_edge
+                    elif left_offset:
                         # A narrower search window must not cut off the DM
                         # digit. Retain the operator's original right edge.
-                        width = crop.shape[1]-left_offset-left
+                        width = search_crop.shape[1]-left_offset-left
                     h, w = image.shape[:2]
                     refined_roi = FixedROI(x+left_offset+left, y+top, width, height, w, h)
                     retry, retry_artifacts = inspect_image(

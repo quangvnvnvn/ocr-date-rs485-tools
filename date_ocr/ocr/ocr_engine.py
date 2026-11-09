@@ -325,5 +325,14 @@ class EasyOCREngine(OCRBase):
                 alternate=FieldReading(*self._recognize_numeric_line(crop,pattern))
                 if alternate.confidence>reading.confidence:
                     reading=alternate
+            elif name=='date' and reading.confidence<minimum_confidence:
+                gray_crop=gray[top:bottom,left:right]
+                _,mask=cv2.threshold(gray_crop,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
+                x,y,w,h=cv2.boundingRect(mask)
+                if w and h:
+                    alternate=FieldReading(*self._recognize_numeric_line(
+                        gray_crop[y:y+h,x:x+w],pattern))
+                    if alternate.confidence>reading.confidence:
+                        reading=alternate
             readings[name]=reading
         return readings

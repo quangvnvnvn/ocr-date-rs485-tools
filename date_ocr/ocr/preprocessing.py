@@ -15,6 +15,23 @@ def runs(mask):
             np.split(indices,np.where(np.diff(indices)>1)[0]+1)]
 
 
+def detect_dark_right_edge(image):
+    """Find the transition from a light package to a wide, dark background."""
+    gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY) if image.ndim==3 else image
+    h,w=gray.shape
+    if min(h,w)<64:
+        return None
+    top,bottom=round(h*.22),round(h*.72)
+    profile=np.median(gray[top:bottom:max(1,(bottom-top)//20)],axis=0)
+    step=max(12,round(w*.025))
+    means=np.convolve(profile,np.ones(step)/step,mode='valid')
+    positions=np.arange(max(step,round(w*.24)),min(len(means),round(w*.77)))
+    edge=int(positions[np.argmax(means[positions-step]-means[positions])])
+    if means[edge-step]>=95 and means[edge]<=65 and np.median(profile[edge:])<=65:
+        return min(w,edge+max(2,round(step*.13)))
+    return None
+
+
 def locate_inkjet_rows(image):
     """Find a tighter two-line crop within a failed, oversized fixed ROI."""
     gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY) if image.ndim==3 else image
