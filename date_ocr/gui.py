@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
         production,trial,diagnostics,configuration,live=pages
         self.live_page=self.mode_tabs.widget(self.mode_tabs.count()-1)
         production.addWidget(QLabel('Sản xuất · Camera Hikrobot nhận trigger ngoài, xử lý và đẩy NG theo cấu hình.'))
-        trial.addWidget(QLabel('Kiểm tra ảnh / thư mục · Không phát tín hiệu đẩy sản phẩm.'))
+        trial.addWidget(QLabel('Chụp thử từ camera hoặc kiểm tra ảnh có sẵn · Không kích xi lanh.'))
         diagnostics.addWidget(QLabel('Kiểm tra camera, RS485 và xi lanh · TEST NG phát một xung DO thật khi bấm.'))
         camera_bar=QHBoxLayout();function_block(configuration,'cameraBlock').addLayout(camera_bar)
         camera_bar.addWidget(QLabel('Nguồn ảnh:'))
@@ -462,10 +462,12 @@ class MainWindow(QMainWindow):
         self.save_roi_button=button('Lưu vùng',self.save_roi,roi_bar)
         self.reset_roi_button=button('Xóa vùng',self.reset_roi,roi_bar)
         self.coords=QLabel('');roi_bar.addWidget(self.coords);roi_bar.addStretch()
-        simulator=QPushButton('Bật mô phỏng trigger bằng ảnh');simulator.clicked.connect(self.arm_simulator);trial.addWidget(simulator)
-        simulated_trigger=QPushButton('Phát trigger mô phỏng');simulated_trigger.clicked.connect(self.simulate_trigger);trial.addWidget(simulated_trigger)
+        self.trial_trigger_button=QPushButton('PHÁT TRIGGER THỬ · CHỤP 1 ẢNH')
+        self.trial_trigger_button.setObjectName('primary')
+        self.trial_trigger_button.setToolTip(self.test_trigger_button.toolTip())
+        self.trial_trigger_button.clicked.connect(self.test_camera_trigger);trial.addWidget(self.trial_trigger_button)
         for page_layout in (trial,diagnostics):
-            disconnect=QPushButton('Ngắt camera / dừng mô phỏng');disconnect.clicked.connect(self.disconnect_camera);page_layout.addWidget(disconnect)
+            disconnect=QPushButton('Ngắt camera');disconnect.clicked.connect(self.disconnect_camera);page_layout.addWidget(disconnect)
         camera_bar.itemAt(0).widget().hide();self.source_mode.hide()
         self.path_label=QLabel('Chọn ảnh để bắt đầu');self.path_label.setObjectName('fileLabel');layout.addWidget(self.path_label)
         split=QSplitter(Qt.Horizontal);self.image_split=split;layout.addWidget(split,1)
@@ -528,11 +530,6 @@ class MainWindow(QMainWindow):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
         if index in (0,1):
             self.source_mode.setCurrentIndex(self.source_mode.findData('hikrobot' if index==0 else 'static'))
-    def arm_simulator(self):
-        if self.camera_worker.isRunning() or self.live_worker.isRunning():return
-        if self.eject_enabled.isChecked():
-            return QMessageBox.information(self,'Mô phỏng','Tắt đẩy NG tự động trong Cài đặt trước khi mô phỏng.')
-        self.source_mode.setCurrentIndex(self.source_mode.findData('simulation'));self.connect_camera()
     def load_operator_settings(self):
         settings=self.config.get('inspection',{})
         ab=str(settings.get('expected_ab','12'))
@@ -623,6 +620,7 @@ class MainWindow(QMainWindow):
             self.live_button.setToolTip('Ngắt phiên camera hoặc dừng test xi lanh trước khi bật Live.'
                                         if camera_running or test_running else 'Xem hình trực tiếp để chỉnh nét và ánh sáng.')
         self.test_trigger_button.setEnabled(not running)
+        self.trial_trigger_button.setEnabled(not running)
         self.open_button.setEnabled(not running)
         self.sample_button.setEnabled(not running)
         self.run_button.setEnabled(mode=='static' and not running)
@@ -747,7 +745,8 @@ class MainWindow(QMainWindow):
         self.live_worker.source=source
         self.source_mode.setEnabled(False);self.camera_serial.setEnabled(False);self.trigger_line.setEnabled(False)
         self.connect_camera_button.setEnabled(False);self.disconnect_camera_button.setEnabled(False)
-        self.test_trigger_button.setEnabled(False);self.live_button.setText('ĐANG MỞ LIVE…');self.live_button.setEnabled(False)
+        self.test_trigger_button.setEnabled(False);self.trial_trigger_button.setEnabled(False)
+        self.live_button.setText('ĐANG MỞ LIVE…');self.live_button.setEnabled(False)
         self.live_info.setText('Đang mở camera…');self.live_view.set_image(None)
         self.live_worker.start(QThread.Priority.HighPriority)
     def stop_live_view(self):
@@ -803,7 +802,8 @@ class MainWindow(QMainWindow):
             self.camera_state.setText('ĐÃ ARM • CHỜ TRIGGER')
             self.camera_state.setStyleSheet('font-weight:800;color:#087448')
             self.disconnect_camera_button.setEnabled(True)
-            self.banner.setText('SẴN SÀNG  ·  CHỜ TRIGGER NGOÀI')
+            ready_text='CHỜ TRIGGER NGOÀI' if self.camera_worker.production else 'CHỜ ẢNH MÔ PHỎNG'
+            self.banner.setText('SẴN SÀNG  ·  '+ready_text)
             self.banner.setStyleSheet('font-size:22px;font-weight:bold;padding:10px;background:#d7f3e4;color:#11663f')
         else:
             self.production_state.setText('Camera đã ngắt · Kết nối tại tab Cài đặt')

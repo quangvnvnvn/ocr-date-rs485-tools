@@ -44,6 +44,7 @@ def result(report, folder, artifacts):
         assert report["validation"]["result"] == "PASS", report["validation"]
         assert report["deadline_met"], report["processing_ms"]
         assert report["deadline_ms"] == 150
+        assert "alignment" not in report
         assert report["hardware"]["external_trigger_only"] is True
         assert report["hardware"]["provider"] == "simulation"
         assert artifacts["original"].shape[:2] == window.image.shape[:2]

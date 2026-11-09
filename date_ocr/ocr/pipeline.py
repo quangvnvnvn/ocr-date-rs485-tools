@@ -58,13 +58,16 @@ def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,pr
             inputs=(variants['gray'],fields,variants[numeric_variant],variants['otsu'],
                     variants[dm_variant],padding,gap)
             result=engine.read_fields_fast(*inputs)
-            if (prefer_gray and not result['date'].text
-                    and (time.perf_counter()-started)*1000<deadline_ms*.45):
-                result=engine.read_fields_fast(*inputs,merge_lower_line=True)
             readings={field:asdict(value) for field,value in result.items()}
             report['candidates'].append(dict(name=f'{numeric_variant}_numeric_fast_1pass',
                 image_variant=numeric_variant,
                 decoder='greedy',fields=readings,raw=candidate_raw(readings)))
+            if (prefer_gray and result['date'].confidence<expected.minimum_confidence
+                    and (time.perf_counter()-started)*1000<deadline_ms*.45):
+                numeric=engine.read_numeric_fields(variants['gray'],variants['otsu'],fields)
+                readings={**readings,**{field:asdict(value) for field,value in numeric.items()}}
+                report['candidates'].append(dict(name='numeric_independent_fields',
+                    image_variant='gray',decoder='greedy',fields=readings,raw=candidate_raw(readings)))
         else:
             # Compatibility path for test doubles and alternate OCR engines.
             report['ocr_mode']='COMPATIBILITY'

@@ -258,7 +258,7 @@ class EasyOCREngine(OCRBase):
         return (text,confidence) if re.fullmatch(pattern,text) else ('',0.)
 
     def read_fields_fast(self,image,fields,numeric_image=None,anchor_image=None,
-                         dm_image=None,numeric_padding=2,numeric_gap=12,*,merge_lower_line=False):
+                         dm_image=None,numeric_padding=2,numeric_gap=12):
         """Read the six configured fields with one CRNN pass.
 
         NSX and DM are fixed anchors and are verified with calibrated HOG shape
@@ -280,7 +280,7 @@ class EasyOCREngine(OCRBase):
         ab_left,ab_top,ab_right,ab_bottom=fields['ab']
         names=('date','dm','ab','time')
         trim_names=('date','time')
-        if merge_lower_line or ab_right-ab_left>2*(ab_bottom-ab_top):
+        if ab_right-ab_left>2*(ab_bottom-ab_top):
             # Keep the lower line intact when its separator is uncertain.
             # The existing CTC pattern still checks the complete reading.
             _,time_top,time_right,time_bottom=fields['time']
@@ -301,3 +301,22 @@ class EasyOCREngine(OCRBase):
         result['ab']=FieldReading(numeric_text[7:9],numeric_conf) if numeric_text else FieldReading('',0.)
         result['time']=FieldReading(numeric_text[9:],numeric_conf) if numeric_text else FieldReading('',0.)
         return result
+
+    def read_numeric_fields(self, gray, ink, fields):
+        """Decode each numeric field independently when the joined CTC line fails."""
+        patterns={'date':r'\d{6}','dm':r'\d','ab':r'\d{2}','time':r'\d{2}:\d{2}'}
+        readings={}
+        for name,pattern in patterns.items():
+            left,top,right,bottom=fields[name]
+            if name=='time':
+                crop=gray[top:bottom,left:right]
+                vertical,horizontal=1,3
+            else:
+                crop=ink[top:bottom,left:right]
+                height,width=crop.shape
+                vertical=4
+                horizontal=max(4,(height-width+1)//2+4)
+            crop=cv2.copyMakeBorder(crop,vertical,vertical,horizontal,horizontal,
+                                    cv2.BORDER_CONSTANT,value=255)
+            readings[name]=FieldReading(*self._recognize_numeric_line(crop,pattern))
+        return readings
