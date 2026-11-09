@@ -73,6 +73,7 @@ class InspectionRuntime:
         metadata: dict[str, Any] | None = None,
         deadline_ms: int = DEFAULT_DEADLINE_MS,
         check_alignment: bool = True,
+        reacquire_camera_roi: bool = False,
     ) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
         """Return a fail-closed report and debug artifacts for one frame.
 
@@ -150,6 +151,22 @@ class InspectionRuntime:
                     refined = True
                 if refined:
                     report["refined_fixed_roi"] = True
+                if (reacquire_camera_roi and not camera_match
+                        and report["validation"]["result"] == "FAIL_ROI_NOT_FOUND"
+                        and self.camera_detector is not None and metadata
+                        and metadata.get("provider") == "hikrobot_mvs"
+                        and metadata.get("serial_number") == self.calibrated_serial
+                        and (time.perf_counter()-decision_started)*1000 < deadline_ms*.40):
+                    retry, retry_artifacts = self.inspect(
+                        image, None, "auto", expected, image_name=image_name, source=source,
+                        received_monotonic=decision_started, metadata=metadata,
+                        deadline_ms=deadline_ms, check_alignment=check_alignment,
+                    )
+                    if (retry["auto_roi"]["reference"] == "camera_calibration"
+                            and retry["validation"]["parsed"] is not None):
+                        retry["roi_mode"] = "fixed"
+                        retry["roi_reacquired"] = True
+                        return retry, retry_artifacts
                 if check_alignment:
                     alignment_image, alignment_height = fixed_alignment_region(image, roi)
                     metrics = report.get("metrics")

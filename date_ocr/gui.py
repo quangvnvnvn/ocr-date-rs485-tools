@@ -134,7 +134,8 @@ class CameraWorker(QThread):
     def run(self):
         records=[];daily_log=None
         try:
-            self.runtime.prepare(self.roi_mode=='auto',self.status.emit)
+            capture_once=self.manual_trigger or self.sensor_test
+            self.runtime.prepare(self.roi_mode=='auto' or capture_once,self.status.emit)
             if self.eject_settings is not None and self.eject_settings.enabled:
                 if not isinstance(self.source,HikrobotMvsSource):
                     raise EjectorError('Chỉ cho phép đẩy thật với camera Hikrobot trigger ngoài')
@@ -142,7 +143,6 @@ class CameraWorker(QThread):
                     lambda phase,frame_id,detail,when:self.eject_event.emit(dict(
                         phase=phase,frame_id=frame_id,detail=detail,monotonic=when)))
                 self.ejector.start()
-            capture_once=self.manual_trigger or self.sensor_test
             self.status.emit('Đang mở camera để chụp thử…' if capture_once
                              else 'Đang mở camera và bật trigger cứng…')
             self.source.open();self.source.start()
@@ -185,7 +185,8 @@ class CameraWorker(QThread):
                     report,artifacts=self.runtime.inspect(packet.image,self.roi,self.roi_mode,
                         self.expected,image_name=name,source=packet.source,
                         received_monotonic=packet.received_monotonic,metadata=metadata,
-                        deadline_ms=self.deadline_ms,check_alignment=False)
+                        deadline_ms=self.deadline_ms,check_alignment=False,
+                        reacquire_camera_roi=capture_once)
                 except Exception as exc:
                     report=dict(image=name,source=packet.source,artifacts=['original'],processing_ms=0,
                         deadline_ms=self.deadline_ms,deadline_met=False,hardware=metadata,

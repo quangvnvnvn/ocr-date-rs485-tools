@@ -302,7 +302,7 @@ class EasyOCREngine(OCRBase):
         result['time']=FieldReading(numeric_text[9:],numeric_conf) if numeric_text else FieldReading('',0.)
         return result
 
-    def read_numeric_fields(self, gray, ink, fields):
+    def read_numeric_fields(self, gray, ink, fields, minimum_confidence):
         """Decode each numeric field independently when the joined CTC line fails."""
         patterns={'date':r'\d{6}','dm':r'\d','ab':r'\d{2}','time':r'\d{2}:\d{2}'}
         readings={}
@@ -316,7 +316,14 @@ class EasyOCREngine(OCRBase):
                 height,width=crop.shape
                 vertical=4
                 horizontal=max(4,(height-width+1)//2+4)
-            crop=cv2.copyMakeBorder(crop,vertical,vertical,horizontal,horizontal,
-                                    cv2.BORDER_CONSTANT,value=255)
-            readings[name]=FieldReading(*self._recognize_numeric_line(crop,pattern))
+            padded=cv2.copyMakeBorder(crop,vertical,vertical,horizontal,horizontal,
+                                      cv2.BORDER_CONSTANT,value=255)
+            reading=FieldReading(*self._recognize_numeric_line(padded,pattern))
+            if name=='time' and reading.confidence<minimum_confidence:
+                # The narrow glyphs and colon can decode differently with
+                # padding. Try the original crop before rejecting the time.
+                alternate=FieldReading(*self._recognize_numeric_line(crop,pattern))
+                if alternate.confidence>reading.confidence:
+                    reading=alternate
+            readings[name]=reading
         return readings

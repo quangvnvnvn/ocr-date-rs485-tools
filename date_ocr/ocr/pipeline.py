@@ -65,7 +65,8 @@ def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,pr
                 decoder='greedy',fields=readings,raw=candidate_raw(readings)))
             if (prefer_gray and result['date'].confidence<expected.minimum_confidence
                     and (time.perf_counter()-started)*1000<deadline_ms*.45):
-                numeric=engine.read_numeric_fields(variants['gray'],variants['otsu'],fields)
+                numeric=engine.read_numeric_fields(variants['gray'],variants['otsu'],fields,
+                                                   expected.minimum_confidence)
                 readings={**readings,**{field:asdict(value) for field,value in numeric.items()}}
                 report['candidates'].append(dict(name='numeric_independent_fields',
                     image_variant='gray',decoder='greedy',fields=readings,raw=candidate_raw(readings)))

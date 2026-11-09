@@ -151,6 +151,14 @@ def _local_ink_layout(corrected):
     fields={};rows=[]
     row_names=(('nsx_anchor','date','dm_anchor','dm'),('ab','time'))
     for components_in_row,names in zip(rows_components,row_names):
+        if names[0]=='ab':
+            # AB starts below NSX. A separate block of package copy to its
+            # left must not be included when splitting AB from the time.
+            limit=fields['nsx_anchor'][0]-median_height*.45
+            components_in_row=[item for item in components_in_row
+                               if item['x']+item['width']>limit]
+            if not components_in_row:
+                raise LayoutError('No DATE characters below NSX')
         top=min(item['y'] for item in components_in_row)
         bottom=max(item['y']+item['height'] for item in components_in_row)
         row_height=bottom-top
