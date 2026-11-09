@@ -16,7 +16,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 
 VIETNAM = timezone(timedelta(hours=7))
 HEADERS = ['Thời gian kiểm tra','Frame','Ngày NSX đọc được','DM','AB','Giờ in',
-           'Độ tin cậy','Lệch góc (°)','Xử lý (ms)','Kết quả','Mã kết quả','Lý do',
+           'Độ tin cậy','Xử lý (ms)','Kết quả','Mã kết quả','Lý do',
            'NSX yêu cầu','AB yêu cầu','DM yêu cầu','Chuỗi OCR']
 
 def now_local():
@@ -28,7 +28,7 @@ def result_row(report, when):
     return [when.replace(tzinfo=None).isoformat(sep=' ',timespec='milliseconds'),
             (report.get('hardware') or {}).get('frame_id'),actual.isoformat() if actual else None,
             p.get('dm'),p.get('ab'),p.get('time'),v.get('overall_confidence'),
-            (report.get('alignment') or {}).get('deviation'),report.get('processing_ms'),
+            report.get('processing_ms'),
             'OK' if v['result']=='PASS' else 'NG',v['result'],v.get('error_reason',''),
             expected.get('expected_date'),expected.get('ab'),expected.get('dm'),v.get('raw','')]
 
@@ -40,10 +40,10 @@ def column(number):
 
 def cell(value, col, row, header=False, result=None):
     style=1 if header else (2 if row%2==0 else 0)
-    if col==10 and not header:style=3 if result=='OK' else 4
+    if col==9 and not header:style=3 if result=='OK' else 4
     kind='inlineStr';content=''
     if value is not None:
-        if not header and col in (1,3,13):
+        if not header and col in (1,3,12):
             value=(datetime.fromisoformat(str(value))-datetime(1899,12,30)).total_seconds()/86400
             style=5 if col==1 else 6
         if isinstance(value,(int,float)) and math.isfinite(value):
@@ -78,13 +78,15 @@ def export_day(connection, output, day):
             with z.open('xl/worksheets/sheet1.xml','w') as sheet:
                 def write(s):sheet.write(s.encode('utf-8'))
                 write('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>')
-                widths=[25,12,22,8,9,12,16,16,16,12,30,50,20,14,14,45]
+                widths=[25,12,22,8,9,12,16,16,12,30,50,20,14,14,45]
                 for i,width in enumerate(widths,1):write(f'<col min="{i}" max="{i}" width="{width}" customWidth="1"/>')
                 write('</cols><sheetData><row r="1" ht="32" customHeight="1">'+''.join(cell(v,i,1,True) for i,v in enumerate(HEADERS,1))+'</row>')
                 for index,(payload,) in enumerate(connection.execute('SELECT payload FROM events WHERE day=? ORDER BY id',(day,)),2):
                     values=json.loads(payload)
-                    write(f'<row r="{index}">'+''.join(cell(v,i,index,result=values[9]) for i,v in enumerate(values,1))+'</row>')
-                write(f'</sheetData><autoFilter ref="A1:P{count+1}"/></worksheet>')
+                    if len(values)==len(HEADERS)+1:
+                        del values[7]  # Older journal rows include the angle.
+                    write(f'<row r="{index}">'+''.join(cell(v,i,index,result=values[8]) for i,v in enumerate(values,1))+'</row>')
+                write(f'</sheetData><autoFilter ref="A1:{column(len(HEADERS))}{count+1}"/></worksheet>')
         temporary.replace(target)
     finally:
         if temporary.exists():temporary.unlink()

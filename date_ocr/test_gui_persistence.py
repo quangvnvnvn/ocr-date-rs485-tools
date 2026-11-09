@@ -22,10 +22,11 @@ first=MainWindow();first.show();app.processEvents()
 last_image=ROOT/'data/test_images/date2.jpg'
 first.load_path(last_image)
 first.ab.setText('07');first.dm.setCurrentText('3')
-first.threshold.setValue(.83);first.max_angle.setValue(4.2)
+first.threshold.setValue(.83)
 first.date.setDate(QDate(2027,3,14))
 first.trial_date.setDate(QDate(2027,3,15))
 first.trial_ab.setText('09');first.trial_dm.setCurrentText('2')
+first.deadline_ms.setValue(150)
 first.source_mode.setCurrentIndex(first.source_mode.findData('hikrobot'))
 first.camera_serial.setText('MV-TEST-001');first.trigger_line.setCurrentText('Line1')
 first.roi_mode.setCurrentIndex(first.roi_mode.findData('fixed'))
@@ -38,7 +39,7 @@ assert saved['trial_expected_ab']=='09' and saved['trial_expected_dm']==2
 assert saved['inspection']=={
     'expected_ab':'07','expected_dm':3,'minimum_confidence':.83,
     'check_nsx_date':True,'expected_date':'2027-03-14',
-    'maximum_angle_deviation':4.2}
+    'deadline_ms':150}
 assert saved['fixed_roi']['x']==700 and saved['fixed_roi']['width']==600
 assert saved['hardware']['source_mode']=='hikrobot'
 assert saved['hardware']['serial_number']=='MV-TEST-001'
@@ -51,10 +52,11 @@ second=MainWindow();second.show();app.processEvents()
 assert second.ab.text()=='07'
 assert second.dm.currentText()=='3'
 assert second.threshold.value()==.83
-assert second.max_angle.value()==4.2
+assert 'maximum_angle_deviation' not in saved['inspection']
 assert second.date.date().toString('yyyy-MM-dd')=='2027-03-14'
 assert second.trial_date.date().toString('yyyy-MM-dd')=='2027-03-15'
 assert second.trial_ab.text()=='09' and second.trial_dm.currentText()=='2'
+assert second.deadline_ms.value()==150
 assert second.roi_mode.currentData()=='fixed'
 assert second.source_mode.currentData()=='hikrobot'
 assert second.camera_serial.text()=='MV-TEST-001'

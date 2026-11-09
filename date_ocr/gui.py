@@ -8,12 +8,13 @@ from PySide6.QtCore import Qt, QRectF, QPointF, QThread, Signal, QDate, QTimer
 from PySide6.QtGui import QPainter, QImage, QColor, QPen, QRegularExpressionValidator, QFont, QFontDatabase
 from PySide6.QtCore import QRegularExpression
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,
-    QPushButton,QLabel,QLineEdit,QComboBox,QDoubleSpinBox,QCheckBox,QDateEdit,
+    QPushButton,QLabel,QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox,QCheckBox,QDateEdit,
     QFileDialog,QMessageBox,QSplitter,QTabWidget,QTextEdit,QTableWidget,QTableWidgetItem,
     QHeaderView,QGroupBox,QSizePolicy)
 from main import load_image, save_image, write_json, save_report, ROOT, EXTENSIONS
 from roi.fixed_roi import FixedROI
 from roi.auto_roi import AutoROIDetector
+from ocr.pipeline import DEFAULT_DEADLINE_MS
 from ocr.validator import Expected
 from inspection_runtime import InspectionRuntime
 from hardware.frame_source import FrameSourceError,missing_frame_count
@@ -88,6 +89,7 @@ class OCRWorker(QThread):
     error=Signal(str)
     def __init__(self,runtime=None):
         super().__init__();self.runtime=runtime or InspectionRuntime();self.jobs=[];self.expected=None;self.output=None
+        self.deadline_ms=DEFAULT_DEADLINE_MS
     def run(self):
         records=[]
         try:
@@ -101,14 +103,16 @@ class OCRWorker(QThread):
                 try:
                     image=load_image(path)
                     report,artifacts=self.runtime.inspect(image,roi,roi_mode,self.expected,
-                        image_name=path.name,source=str(path))
+                        image_name=path.name,source=str(path),deadline_ms=self.deadline_ms,
+                        check_alignment=False)
                     for name,array in artifacts.items():save_image(folder/f'{name}.png',array)
                 except Exception as exc:
                     report=dict(image=path.name,source=str(path),artifacts=[],processing_ms=0,
+                        deadline_ms=self.deadline_ms,deadline_met=False,
                         validation=dict(result='FAIL_OCR',raw='',parsed=None,confidence={},overall_confidence=None,error_reason=str(exc)))
                 write_json(folder/'result.json',report);records.append(report)
                 self.result.emit(report,folder)
-            save_report(self.output,records)
+            save_report(self.output,records,include_alignment=False)
             self.status.emit(f'Đã kiểm tra {len(records)} ảnh. Kết quả đã lưu.')
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -124,6 +128,7 @@ class CameraWorker(QThread):
     def __init__(self,runtime=None):
         super().__init__();self.runtime=runtime or InspectionRuntime();self.source=None
         self.expected=None;self.roi=None;self.roi_mode='auto';self.timeout_ms=100;self.output=None
+        self.deadline_ms=DEFAULT_DEADLINE_MS
         self.eject_settings=None;self.ejector=None
         self.production=False;self.manual_trigger=False
     def run(self):
@@ -173,10 +178,11 @@ class CameraWorker(QThread):
                 try:
                     report,artifacts=self.runtime.inspect(packet.image,self.roi,self.roi_mode,
                         self.expected,image_name=name,source=packet.source,
-                        received_monotonic=packet.received_monotonic,metadata=metadata)
+                        received_monotonic=packet.received_monotonic,metadata=metadata,
+                        deadline_ms=self.deadline_ms,check_alignment=False)
                 except Exception as exc:
                     report=dict(image=name,source=packet.source,artifacts=['original'],processing_ms=0,
-                        deadline_ms=100,deadline_met=False,hardware=metadata,
+                        deadline_ms=self.deadline_ms,deadline_met=False,hardware=metadata,
                         validation=dict(result='FAIL_OCR',raw='',parsed=None,confidence={},
                             overall_confidence=None,error_reason=str(exc)))
                     artifacts={'original':packet.image}
@@ -210,7 +216,7 @@ class CameraWorker(QThread):
                     for artifact_name,array in artifacts.items():save_image(folder/f'{artifact_name}.png',array)
                     write_json(folder/'result.json',report)
                 if self.manual_trigger:break
-            if not self.production:save_report(self.output,records)
+            if not self.production:save_report(self.output,records,include_alignment=False)
         except Exception:
             self.error.emit(traceback.format_exc())
         finally:
@@ -431,10 +437,10 @@ class MainWindow(QMainWindow):
         self.nsx_label=QLabel('Ngày NSX cần kiểm tra:');settings.addWidget(self.nsx_label)
         self.date=QDateEdit(QDate.currentDate());self.date.setCalendarPopup(True);self.date.setDisplayFormat('dd/MM/yyyy');settings.addWidget(self.date);settings.addStretch()
         self.date.setEnabled(True);self.date.setToolTip('Chọn ngày NSX cần có trên sản phẩm. Ngày đã chọn sẽ được ghi nhớ.')
-        settings.insertWidget(settings.count()-1,QLabel('Lệch góc tối đa:'))
-        self.max_angle=QDoubleSpinBox();self.max_angle.setRange(.1,15);self.max_angle.setDecimals(1);self.max_angle.setSingleStep(.1);self.max_angle.setValue(3.0);self.max_angle.setSuffix('°')
-        self.max_angle.setToolTip('Độ lệch cho phép giữa hướng chữ DATE và mép dải ngang tối phía dưới.')
-        settings.insertWidget(settings.count()-1,self.max_angle)
+        self.deadline_ms=QSpinBox();self.deadline_ms.setRange(1,5000);self.deadline_ms.setSuffix(' ms')
+        self.deadline_ms.setToolTip('Tính từ lúc nhận ảnh đến lúc có kết quả. Kết quả đến trễ không được tính ĐẠT.')
+        settings.insertWidget(settings.count()-1,QLabel('Giới hạn xử lý:'))
+        settings.insertWidget(settings.count()-1,self.deadline_ms)
         production_settings=QHBoxLayout();function_block(production,'inspectionBlock').addLayout(production_settings)
         for i in range(settings.count()-1,-1,-1):
             widget=settings.itemAt(i).widget()
@@ -469,7 +475,7 @@ class MainWindow(QMainWindow):
         right=QWidget();right.setObjectName('resultPanel');rl=QVBoxLayout(right)
         self.banner=QLabel('SẴN SÀNG');self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:#dae9f0');rl.addWidget(self.banner)
         self.tabs=QTabWidget();self.views={}
-        for key,label in [('roi','ROI DATE'),('final','Ảnh OCR'),('alignment','DATE ↔ dải tối'),('gray','Xám'),('otsu','Otsu'),('clahe','CLAHE'),('adaptive','Adaptive'),('morphology','Morphology')]:
+        for key,label in [('roi','ROI DATE'),('final','Ảnh OCR'),('gray','Xám'),('otsu','Otsu'),('clahe','CLAHE'),('adaptive','Adaptive'),('morphology','Morphology')]:
             view=ImageView();self.views[key]=view;self.tabs.addTab(view,label)
         self.debug_text=QTextEdit();self.debug_text.setReadOnly(True);self.tabs.addTab(self.debug_text,'Chi tiết OCR')
         self.debug_toggle=QCheckBox('Hiện ảnh xử lý và chi tiết OCR');self.debug_toggle.toggled.connect(self.toggle_debug);rl.addWidget(self.debug_toggle)
@@ -479,13 +485,13 @@ class MainWindow(QMainWindow):
         self.details.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);rl.addWidget(self.details)
         split.addWidget(right);split.setSizes([580,620])
         self.live_view=ImageView();layout.addWidget(self.live_view,1)
-        self.history=QTableWidget(0,9);self.history.setHorizontalHeaderLabels(['Ảnh','Ngày sản xuất','DM','AB','Giờ in','Độ tin cậy','Lệch góc','Xử lý','Kết quả'])
+        self.history=QTableWidget(0,8);self.history.setHorizontalHeaderLabels(['Ảnh','Ngày sản xuất','DM','AB','Giờ in','Độ tin cậy','Xử lý','Kết quả'])
         self.history.setAlternatingRowColors(True);self.history.verticalHeader().hide();self.history.verticalHeader().setDefaultSectionSize(30)
         self.history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.history.setFixedHeight(190)
         self.history.setSelectionBehavior(QTableWidget.SelectRows);self.history.setEditTriggers(QTableWidget.NoEditTriggers)
         self.history.cellClicked.connect(self.history_selected);layout.addWidget(self.history)
         footer=QHBoxLayout();layout.addLayout(footer)
-        self.status=QLabel('Chạy local • mục tiêu quyết định ≤ 100 ms');footer.addWidget(self.status,1)
+        self.status=QLabel('Sẵn sàng kiểm tra');footer.addWidget(self.status,1)
         self.stop=QPushButton('Dừng sau ảnh hiện tại');self.stop.clicked.connect(self.worker.requestInterruption);self.stop.setEnabled(False);footer.addWidget(self.stop)
         out=QPushButton('Mở thư mục kết quả');out.clicked.connect(self.open_output);footer.addWidget(out)
         self.load_operator_settings()
@@ -513,7 +519,7 @@ class MainWindow(QMainWindow):
         self.mode_tabs.updateGeometry()
     def lock_inspection_settings(self,locked):
         for widget in (self.date,self.trial_date,self.ab,self.trial_ab,self.dm,self.trial_dm,
-                       self.threshold,self.max_angle,self.roi_mode):
+                       self.threshold,self.roi_mode,self.deadline_ms):
             widget.setEnabled(not locked)
     def operator_tab_changed(self,index):
         self.update_operator_layout(index)
@@ -535,8 +541,10 @@ class MainWindow(QMainWindow):
         if dm>=0:self.dm.setCurrentIndex(dm)
         threshold=settings.get('minimum_confidence',.80)
         if isinstance(threshold,(int,float)) and .01<=threshold<=1:self.threshold.setValue(threshold)
-        maximum_angle=settings.get('maximum_angle_deviation',3.0)
-        if isinstance(maximum_angle,(int,float)) and .1<=maximum_angle<=15:self.max_angle.setValue(maximum_angle)
+        deadline=settings.get('deadline_ms',DEFAULT_DEADLINE_MS)
+        if type(deadline) is not int or not self.deadline_ms.minimum()<=deadline<=self.deadline_ms.maximum():
+            deadline=DEFAULT_DEADLINE_MS
+        self.deadline_ms.setValue(deadline)
         self.check_date.setChecked(True)
         expected_date=settings.get('expected_date')
         if expected_date:
@@ -573,8 +581,7 @@ class MainWindow(QMainWindow):
         self.config['roi_mode']=self.roi_mode.currentData()
         self.config['inspection']={'expected_ab':self.ab.text(),'expected_dm':int(self.dm.currentText()),
             'minimum_confidence':self.threshold.value(),'check_nsx_date':True,
-            'expected_date':self.date.date().toString('yyyy-MM-dd'),
-            'maximum_angle_deviation':self.max_angle.value()}
+            'expected_date':self.date.date().toString('yyyy-MM-dd'),'deadline_ms':self.deadline_ms.value()}
         self.config['hardware']={'source_mode':self.source_mode.currentData(),
             'provider':'hikrobot_mvs','serial_number':self.camera_serial.text().strip(),
             'trigger_mode':'hardware','trigger_source':self.trigger_line.currentText(),
@@ -630,7 +637,7 @@ class MainWindow(QMainWindow):
             self.coords.setText('AUTO ROI sẽ tự bám theo mẫu bao bì khi kiểm tra')
             self.show_status('AUTO ROI đang bật • Không cần khoanh vùng bằng tay')
     def toggle_debug(self,enabled):
-        for index in range(3,self.tabs.count()):self.tabs.setTabVisible(index,enabled)
+        for index in range(2,self.tabs.count()):self.tabs.setTabVisible(index,enabled)
     def show_status(self,text):self.status.setText(text)
     def clear_result(self):
         self.banner.setText('SẴN SÀNG KIỂM TRA');self.banner.setStyleSheet('font-size:22px;font-weight:bold;padding:10px;border-radius:6px;background:#e5f0f7;color:#315c76')
@@ -672,8 +679,7 @@ class MainWindow(QMainWindow):
     def current_expected(self,*,trial=False):
         date,ab,dm=(self.trial_date,self.trial_ab,self.trial_dm) if trial else (self.date,self.ab,self.dm)
         return Expected(ab.text(),int(dm.currentText()),self.threshold.value(),
-            check_nsx_date=True,expected_date=date.date().toPython(),
-            maximum_angle_deviation=self.max_angle.value())
+            check_nsx_date=True,expected_date=date.date().toPython())
     def begin(self,jobs):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or not jobs:return
         try:expected=self.current_expected(trial=True)
@@ -682,7 +688,7 @@ class MainWindow(QMainWindow):
         self.save_operator_settings()
         self.clear_result();self.banner.setText('ĐANG ĐỌC…');self.controls.setEnabled(False);self.original.selecting=False
         self.history.setEnabled(False);self.stop.setEnabled(True);self.rows=[];self.history.setRowCount(0)
-        self.worker.jobs=jobs;self.worker.expected=expected
+        self.worker.jobs=jobs;self.worker.expected=expected;self.worker.deadline_ms=self.deadline_ms.value()
         self.worker.start(QThread.Priority.HighPriority)
     def connect_camera(self,*,manual_trigger=False):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or self.eject_test_worker.isRunning():return
@@ -719,6 +725,7 @@ class MainWindow(QMainWindow):
         self.camera_worker.eject_settings=eject
         self.camera_worker.production=(mode=='hikrobot' and not manual_trigger)
         self.camera_worker.manual_trigger=manual_trigger
+        self.camera_worker.deadline_ms=self.deadline_ms.value()
         self.camera_worker.timeout_ms=int(self.config.get('hardware',{}).get('frame_timeout_ms',100))
         self.source_mode.setEnabled(False);self.connect_camera_button.setEnabled(False)
         self.camera_serial.setEnabled(False);self.trigger_line.setEnabled(False)
@@ -909,12 +916,11 @@ class MainWindow(QMainWindow):
             self.rows.pop(0);self.history.removeRow(0)
         self.rows.append((report,folder));row=self.history.rowCount();self.history.insertRow(row)
         v=report['validation'];p=v.get('parsed') or {};conf=v.get('overall_confidence')
-        alignment=report.get('alignment') or {};deviation=alignment.get('deviation')
         date_text=f"{p['day']:02d}/{p['month']:02d}/{p['year']}" if p else '—'
-        values=[report['image'],date_text,p.get('dm','—'),p.get('ab','—'),p.get('time','—'),f'{conf:.2%}' if conf is not None else '—',f'{deviation:.2f}°' if deviation is not None else '—',f'{report.get("processing_ms",0):.1f} ms','ĐẠT' if v['result']=='PASS' else 'LỖI']
+        values=[report['image'],date_text,p.get('dm','—'),p.get('ab','—'),p.get('time','—'),f'{conf:.2%}' if conf is not None else '—',f'{report.get("processing_ms",0):.1f} ms','ĐẠT' if v['result']=='PASS' else 'LỖI']
         for col,value in enumerate(values):
             item=QTableWidgetItem(str(value));item.setBackground(QColor('#edf8f1' if v['result']=='PASS' else '#fff0ed'));self.history.setItem(row,col,item)
-        self.history.item(row,8).setForeground(QColor('#117449' if v['result']=='PASS' else '#b32b30'))
+        self.history.item(row,self.history.columnCount()-1).setForeground(QColor('#117449' if v['result']=='PASS' else '#b32b30'))
     def show_record(self,report,folder,artifacts=None):
         v=report['validation'];ok=v['result']=='PASS';self.banner.setText('ĐẠT  ·  PASS' if ok else 'KHÔNG ĐẠT  ·  '+v['result'])
         self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:'+('#d7f3e4;color:#11663f' if ok else '#ffe0df;color:#a72525'))
@@ -938,37 +944,33 @@ class MainWindow(QMainWindow):
             else:view.set_image(load_image(folder/(name+'.png')) if (folder/(name+'.png')).exists() else None)
         lines=[v.get('raw',''),'',f"Kết quả: {v['result']} | {report['processing_ms']} ms",f"Lý do: {v['error_reason']}",f"Confidence: {v.get('confidence',{})}",f"Expected: {report.get('expected',{})}"]
         if report.get('auto_roi'):lines.append('AUTO ROI: '+str(report['auto_roi']))
-        if report.get('alignment'):lines.append('ANGLE: '+str(report['alignment']))
         for c in report.get('candidates',[]):lines.extend(['',c['name']+': '+c['raw'].replace('\n',' / ')])
         self.debug_text.setPlainText('\n'.join(lines))
         p=v.get('parsed') or {};conf=v.get('overall_confidence');expected=report.get('expected',{})
+        deadline=report.get('deadline_ms',DEFAULT_DEADLINE_MS)
         labels={'FAIL_DM':'Mã DM khác với thiết lập.','FAIL_AB':'Mã AB khác với thiết lập.',
                 'FAIL_DATE':'Ngày in không hợp lệ.','FAIL_TIME':'Giờ in không hợp lệ.',
                 'FAIL_DATE_MISMATCH':'Ngày sản xuất khác ngày đã chọn.',
-                'FAIL_DATE_ALIGNMENT':'DATE bị lệch quá giới hạn so với dải tối phía dưới.',
-                'FAIL_REFERENCE_LINE_NOT_FOUND':'Không tìm thấy mép dải tối phía dưới để so sánh góc.',
                 'FAIL_FRAME_GAP':'Thiếu frame trigger theo số thứ tự camera. Dừng máy và kiểm tra tốc độ/cáp/buffer.',
                 'FAIL_BUSY':'Trigger đến khi frame trước còn chờ xử lý.',
                 'FAIL_OCR_LOW_CONFIDENCE':'Chữ chưa đủ rõ để xác nhận. Hãy kiểm tra ảnh và vùng DATE.',
-                'FAIL_DEADLINE':'Kết quả đến trễ hơn giới hạn 100 ms.',
+                'FAIL_DEADLINE':f'Kết quả đến trễ hơn giới hạn {deadline} ms.',
                 'FAIL_ROI_NOT_FOUND':'Chưa xác định được đủ hai dòng DATE. Hãy khoanh lại vùng.',
                 'FAIL_FORMAT':'Chữ đọc được không đúng cấu trúc yêu cầu.',
                 'FAIL_OCR':'Không đọc chắc chắn. Xem ảnh hoặc chi tiết OCR.'}
         day=f"{p['day']:02d}/{p['month']:02d}/{p['year']}" if p else '—'
-        alignment=report.get('alignment') or {};deviation=alignment.get('deviation')
-        angle_text=(f'{deviation:.2f}° / {alignment.get("maximum_deviation",self.max_angle.value()):.2f}°'
-                    if deviation is not None else '—')
-        fields=[('NGÀY SẢN XUẤT',day),('DM',p.get('dm','—')),('AB',p.get('ab','—')),('GIỜ IN',p.get('time','—')),('ĐỘ LỆCH',angle_text)]
+        fields=[('NGÀY SẢN XUẤT',day),('DM',p.get('dm','—')),('AB',p.get('ab','—')),('GIỜ IN',p.get('time','—'))]
         cells=''.join(f'<td><span style="color:#60798b;font-size:10px">{key}</span><br><span style="font-size:19px;font-weight:600">{html.escape(str(value))}</span></td>' for key,value in fields)
         message='Khớp các điều kiện kiểm tra.' if ok else labels.get(v['result'],'Xem chi tiết OCR để kiểm tra lỗi.')
         confidence_text=f'{conf:.2%}' if conf is not None else '—'
         elapsed=report.get('processing_ms',0);timing_color='#117449' if report.get('deadline_met') else '#b32b30'
+        late_text=' · QUÁ GIỚI HẠN' if elapsed>deadline else ''
         device_text='GPU CUDA' if str(report.get('ocr_device','')).startswith('cuda') else 'CPU'
         auto=report.get('auto_roi');auto_text=(f' &nbsp; | &nbsp; AUTO ROI: <b>{auto["confidence"]:.1%}</b>' if auto and auto.get('found') else '')
         self.details.setHtml(f'<table width="100%" cellpadding="3"><tr>{cells}</tr></table>'
             f'<p style="color:#496778">Yêu cầu: NSX <b>{self.date.date().toString("dd/MM/yyyy")}</b> · AB <b>{html.escape(str(expected.get("ab","—")))}</b> · DM <b>{expected.get("dm","—")}</b>'
             f' &nbsp; | &nbsp; Độ tin cậy: <b>{confidence_text}</b>{auto_text}</p>'
-            f'<p style="color:{timing_color}">Thời gian quyết định: <b>{elapsed:.1f} ms</b> / mục tiêu ≤ 100 ms · OCR: <b>{device_text}</b></p>'
+            f'<p style="color:{timing_color}">Thời gian quyết định: <b>{elapsed:.1f} ms</b> / giới hạn {deadline} ms{late_text} · OCR: <b>{device_text}</b></p>'
             f'<p style="color:{"#117449" if ok else "#b32b30"}">{message}</p>')
     def history_selected(self,row,col):
         if row<len(self.rows):self.show_record(*self.rows[row])
@@ -1017,7 +1019,7 @@ def main():
         window.source_mode.setCurrentIndex(window.source_mode.findData('simulation'))
         window.roi_mode.setCurrentIndex(window.roi_mode.findData('auto'))
         window.trial_ab.setText('12');window.trial_dm.setCurrentText('1');window.threshold.setValue(.70)
-        window.max_angle.setValue(3.0);window.trial_date.setDate(QDate(2026,8,22))
+        window.trial_date.setDate(QDate(2026,8,22))
         def smoke_armed(info):
             if info.get('ready') and state['report'] is None:QTimer.singleShot(0,window.simulate_trigger)
         def smoke_result(report,folder,artifacts):

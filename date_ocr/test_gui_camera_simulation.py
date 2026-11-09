@@ -26,8 +26,9 @@ window.source_mode.setCurrentIndex(window.source_mode.findData("simulation"))
 window.roi_mode.setCurrentIndex(window.roi_mode.findData("auto"))
 window.ab.setText("98"); window.dm.setCurrentText("3")
 window.trial_ab.setText("12"); window.trial_dm.setCurrentText("1")
-window.threshold.setValue(.70); window.max_angle.setValue(3.0)
+window.threshold.setValue(.70)
 window.trial_date.setDate(QDate(2026, 8, 22))
+window.deadline_ms.setValue(150)
 state = {"armed": False, "result": None}
 
 
@@ -42,6 +43,7 @@ def result(report, folder, artifacts):
         state["result"] = report
         assert report["validation"]["result"] == "PASS", report["validation"]
         assert report["deadline_met"], report["processing_ms"]
+        assert report["deadline_ms"] == 150
         assert report["hardware"]["external_trigger_only"] is True
         assert report["hardware"]["provider"] == "simulation"
         assert artifacts["original"].shape[:2] == window.image.shape[:2]

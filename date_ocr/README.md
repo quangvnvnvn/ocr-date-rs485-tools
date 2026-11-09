@@ -14,11 +14,13 @@ và không kích xi lanh.
 ## Chế độ quyết định 100 ms
 
 Luồng mặc định dùng ONNX Runtime CPU 4 luồng, không cần GPU rời/CUDA/PyTorch,
-phù hợp cấu hình mục tiêu Core i5 Gen 8 và RAM 8 GB. Hạn chót 100 ms tính từ khi
-đã có frame trong bộ nhớ đến lúc có PASS/FAIL. Bám ROI chạy trên ảnh thu nhỏ,
+phù hợp cấu hình mục tiêu Core i5 Gen 8 và RAM 8 GB. Hạn chót mặc định là 100 ms,
+tính từ lúc nhận ảnh đến khi có kết quả. Có thể đổi và lưu tại
+**Cài đặt → Giới hạn xử lý**. Bám ROI chạy trên ảnh thu nhỏ,
 vùng DATE được nắn phối cảnh về đúng chiều, góc chữ được tìm bằng hình học nét in
 và bốn trường số được ghép theo vị trí đã hiệu chuẩn để mô hình OCR chỉ chạy một lần. NSX/DM cố định được xác nhận bằng HOG từ ảnh hiệu
-chuẩn. Góc DATE còn được so sánh với mép của dải ngang tối ngay phía dưới. Bộ dò
+chuẩn. Công cụ dòng lệnh hỗ trợ so sánh góc DATE với mép dải tối. Giao diện
+vận hành bỏ qua phép đo này. Bộ dò góc dòng lệnh
 bắt buộc một phía của mép phải là mảng tối rộng, nên không nhận nhầm viền bao bì,
 nét chữ hoặc đường minh họa mảnh làm chuẩn.
 Chuỗi OCR vẫn phải đúng độ dài, dấu hai chấm, parser, confidence và điều
@@ -104,7 +106,7 @@ Mỗi frame lưu số frame của SDK. Nếu số thứ tự nhảy cóc, frame 
 `FAIL_FRAME_GAP`; phần mềm không bỏ qua mất ảnh rồi báo PASS. Mô phỏng dùng đúng một
 ô chờ và trả `FAIL_BUSY` nếu trigger mới tới khi ô đó còn đầy.
 
-Mốc 100 ms được đo từ lúc MVS giao buffer ảnh cho tiến trình (kể cả sao chép/chuyển
+Giới hạn xử lý được đo từ lúc MVS giao buffer ảnh cho tiến trình (kể cả sao chép/chuyển
 pixel) đến lúc có quyết định. Exposure, thời gian truyền trước khi SDK giao buffer,
 độ trễ PLC và cơ cấu chấp hành chưa nằm trong mốc này. Khi lắp camera phải benchmark
 lại với đúng model, resolution, exposure, CPU, cáp và tần suất trigger thực tế.
@@ -185,8 +187,8 @@ nội dung OCR/đáp án. Folder ảnh ở vị trí ổn định có thể dùn
 ## Pipeline đã chọn
 
 AUTO ROI thu nhỏ → RANSAC → nắn phối cảnh/xoay đúng chiều → grayscale → tìm góc bằng contour chữ → deskew →
-Otsu tách line/field → một lần OCR số → kiểm tra anchor → parser → validator →
-đo góc mép dải ngang tối phía dưới → so sánh độ lệch → kiểm tra hạn chót 100 ms.
+Tách hai dòng và các trường → OCR số → kiểm tra anchor → kiểm tra cấu trúc và
+giá trị → kiểm tra giới hạn xử lý đã cài.
 
 Không upscale vì chữ gốc cao 57–70 px. Không nối dot hay chia từng chữ số đang chạm nhau;
 recognizer đọc cả field DATE. CLAHE/adaptive/morphology đã benchmark và lưu ảnh debug,

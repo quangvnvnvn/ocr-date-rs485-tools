@@ -41,10 +41,14 @@ def locate_inkjet_rows(image):
     if len(pairs)!=1:
         return None
     top,bottom,height=pairs[0]
+    left=margin
+    if np.mean(local_ink[top:top+height,:3]>43)>.35:
+        # The first glyph reaches the search margin. Leave room for its stroke.
+        left=round(w*.06)
     padding=round(height*.55)
     top=max(0,top-padding)
     bottom=min(h,bottom+padding)
-    return margin,top,w-2*margin,bottom-top
+    return left,top,w-2*left,bottom-top
 
 
 def estimate_skew(binary):
@@ -212,6 +216,9 @@ def preprocess(image):
         otsu,fields,rows=global_layout
     else:
         otsu,fields,rows=_local_ink_layout(corrected)
+    row_heights=[bottom-top for top,bottom in rows]
+    if max(row_heights)>2*min(row_heights):
+        raise LayoutError('The two DATE lines have inconsistent character heights')
     clahe=cv2.createCLAHE(clipLimit=2.0,tileGridSize=(8,8)).apply(corrected)
     adaptive=cv2.adaptiveThreshold(clahe,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                     cv2.THRESH_BINARY,31,11)
@@ -219,7 +226,7 @@ def preprocess(image):
     morphology=cv2.morphologyEx(otsu,cv2.MORPH_CLOSE,np.ones((2,2),np.uint8))
     return dict(gray=corrected,otsu=otsu,clahe=clahe,adaptive=adaptive,
                 morphology=morphology),fields,dict(angle=angle,rows=rows,
-                character_heights=[b-a for a,b in rows],line_gap=rows[1][0]-rows[0][1],
+                character_heights=row_heights,line_gap=rows[1][0]-rows[0][1],
                 numeric_variant='gray' if global_layout_clean else 'adaptive',
                 dm_variant='gray' if global_layout_clean else 'otsu',
                 uneven_illumination=not global_layout_clean)

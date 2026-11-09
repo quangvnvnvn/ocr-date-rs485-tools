@@ -37,6 +37,6 @@ def done():
  w.close();TEST_CONFIG.write_text(original_config,encoding='utf-8');app.quit()
 w.worker.finished.connect(done)
 w.trial_ab.setText('12');w.trial_dm.setCurrentText('1')
-w.threshold.setValue(.70);w.max_angle.setValue(3.0)
+w.threshold.setValue(.70)
 QTimer.singleShot(0,w.samples);QTimer.singleShot(90000,lambda:app.exit(2))
 sys.exit(app.exec())

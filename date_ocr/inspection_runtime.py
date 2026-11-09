@@ -11,7 +11,7 @@ import numpy as np
 
 from main import ROOT
 from ocr.alignment import AlignmentError, fixed_alignment_region, inspect_alignment
-from ocr.pipeline import inspect_image
+from ocr.pipeline import DEFAULT_DEADLINE_MS, inspect_image
 from ocr.preprocessing import locate_inkjet_rows
 from ocr.validator import Expected
 from roi.auto_roi import AutoROIDetector
@@ -51,10 +51,12 @@ class InspectionRuntime:
         source: str,
         received_monotonic: float | None = None,
         metadata: dict[str, Any] | None = None,
+        deadline_ms: int = DEFAULT_DEADLINE_MS,
+        check_alignment: bool = True,
     ) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
         """Return a fail-closed report and debug artifacts for one frame.
 
-        The 100 ms clock starts when the SDK hands the frame to this process.
+        The decision clock starts when the SDK hands the frame to this process.
         Camera exposure and network transfer are reported separately by the SDK
         when such timestamps are available; they are not invented here.
         """
@@ -77,10 +79,11 @@ class InspectionRuntime:
                 auto_ms = (time.perf_counter() - auto_started) * 1000
                 if auto_result.found:
                     inspection_image = self.auto_detector.rectify(image, auto_result)
-                    alignment_image = self.auto_detector.rectify(
-                        image, auto_result, margin_bottom=1.05
-                    )
-                    alignment_height = self.auto_detector.reference_roi.height
+                    if check_alignment:
+                        alignment_image = self.auto_detector.rectify(
+                            image, auto_result, margin_bottom=1.05
+                        )
+                        alignment_height = self.auto_detector.reference_roi.height
                     ih, iw = inspection_image.shape[:2]
                     roi = FixedROI(0, 0, iw, ih, iw, ih)
                 else:
@@ -89,28 +92,31 @@ class InspectionRuntime:
             else:
                 inspection_image = image
 
-            report, artifacts = inspect_image(inspection_image, roi, self.engine, expected)
+            report, artifacts = inspect_image(inspection_image, roi, self.engine, expected, deadline_ms)
             if roi_mode == "fixed" and roi is not None:
                 if report["validation"]["result"] == "FAIL_ROI_NOT_FOUND" and "roi" in artifacts:
                     inner = locate_inkjet_rows(artifacts["roi"])
-                    # Leave at least 60 ms of the frame budget for OCR and alignment.
-                    if inner is not None and time.perf_counter()-decision_started < .040:
+                    # Reserve the majority of the frame budget for OCR and alignment.
+                    elapsed_ms = (time.perf_counter()-decision_started)*1000
+                    if inner is not None and elapsed_ms < deadline_ms*.40:
                         x, y, _, _ = report["bbox"]
                         left, top, width, height = inner
                         h, w = image.shape[:2]
                         roi = FixedROI(x+left, y+top, width, height, w, h)
-                        report, artifacts = inspect_image(image, roi, self.engine, expected, prefer_gray=True)
+                        report, artifacts = inspect_image(image, roi, self.engine, expected, deadline_ms,
+                                                          prefer_gray=True)
                         report["refined_fixed_roi"] = True
-                alignment_image, alignment_height = fixed_alignment_region(image, roi)
-                metrics = report.get("metrics")
-                if metrics:
-                    # A large manual ROI can include the entire dark stripe
-                    # or artwork below it. Size the search from the DATE rows
-                    # in that case so it does not skip past the stripe.
-                    text_bottom = metrics["rows"][-1][1]
-                    text_height = text_bottom + round(max(metrics["character_heights"])*.5)
-                    if text_height < alignment_height*.70:
-                        alignment_height = text_height
+                if check_alignment:
+                    alignment_image, alignment_height = fixed_alignment_region(image, roi)
+                    metrics = report.get("metrics")
+                    if metrics:
+                        # Large manual ROIs can include artwork below the band.
+                        text_bottom = metrics["rows"][-1][1]
+                        text_height = text_bottom + round(max(metrics["character_heights"])*.5)
+                        if text_height < alignment_height*.70:
+                            alignment_height = text_height
+            if not check_alignment:
+                report["expected"].pop("maximum_angle_deviation", None)
             report["stage_ms"]["auto_roi"] = round(auto_ms, 2)
             report["ocr_processing_ms"] = report["processing_ms"]
             alignment_started = time.perf_counter()

@@ -29,6 +29,12 @@ class ProductionLogTests(unittest.TestCase):
             path=Path(tmp);log=DailyProductionLog(path,interval=100)
             log.append(report(),datetime(2026,10,29,23,59,59,tzinfo=VIETNAM))
             log.append(report('FAIL_AB'),datetime(2026,10,30,0,0,1,tzinfo=VIETNAM));log.close()
+            with sqlite3.connect(path/'.internal/results.sqlite3') as db:
+                event_id,payload=db.execute('SELECT id,payload FROM events ORDER BY id LIMIT 1').fetchone()
+                legacy=json.loads(payload)
+                legacy.insert(7,1.25)
+                db.execute('UPDATE events SET payload=? WHERE id=?',(json.dumps(legacy),event_id))
+            db.close()
             log=DailyProductionLog(path,interval=100)
             log.append(report(),datetime(2026,10,29,12,0,tzinfo=VIETNAM));log.close()
             self.assertEqual(len(list(path.glob('*.xlsx'))),2)
@@ -41,7 +47,9 @@ class ProductionLogTests(unittest.TestCase):
                 self.assertEqual(cells['A2'].attrib['t'],'n')
                 self.assertEqual(cells['C2'].attrib['t'],'n')
                 self.assertEqual(cells['E2'].find('s:is/s:t',ns).text,'05')
-                self.assertEqual(cells['P2'].find('s:is/s:t',ns).text,'=1+1')
+                self.assertEqual(cells['H2'].find('s:v',ns).text,'42.5')
+                self.assertEqual(cells['I2'].find('s:is/s:t',ns).text,'OK')
+                self.assertEqual(cells['O2'].find('s:is/s:t',ns).text,'=1+1')
                 self.assertEqual(cells['G2'].find('s:v',ns).text,'0.95')
             self.assertFalse(list(path.rglob('*.png')))
 

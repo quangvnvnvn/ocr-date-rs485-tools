@@ -258,7 +258,7 @@ class EasyOCREngine(OCRBase):
         return (text,confidence) if re.fullmatch(pattern,text) else ('',0.)
 
     def read_fields_fast(self,image,fields,numeric_image=None,anchor_image=None,
-                         dm_image=None,numeric_padding=2,numeric_gap=12):
+                         dm_image=None,numeric_padding=2,numeric_gap=12,*,merge_lower_line=False):
         """Read the six configured fields with one CRNN pass.
 
         NSX and DM are fixed anchors and are verified with calibrated HOG shape
@@ -280,10 +280,9 @@ class EasyOCREngine(OCRBase):
         ab_left,ab_top,ab_right,ab_bottom=fields['ab']
         names=('date','dm','ab','time')
         trim_names=('date','time')
-        if ab_right-ab_left>2*(ab_bottom-ab_top):
-            # A two-digit AB field cannot span this much ink at the calibrated
-            # character size. Keep the lower line intact when the split falls
-            # inside the time, and let the existing CTC pattern check it.
+        if merge_lower_line or ab_right-ab_left>2*(ab_bottom-ab_top):
+            # Keep the lower line intact when its separator is uncertain.
+            # The existing CTC pattern still checks the complete reading.
             _,time_top,time_right,time_bottom=fields['time']
             fields={**fields,'lower_line':(ab_left,min(ab_top,time_top),
                                          time_right,max(ab_bottom,time_bottom))}

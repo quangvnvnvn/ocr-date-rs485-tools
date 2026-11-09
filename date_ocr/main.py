@@ -49,7 +49,7 @@ def write_json(path,data):
     temp.replace(path)
 
 
-def save_report(out,records):
+def save_report(out,records,*,include_alignment=True):
     esc=lambda value:html.escape(str(value))
     sections=[]
     for index,record in enumerate(records):
@@ -77,12 +77,15 @@ def save_report(out,records):
     write_json(out/'results.json',records)
     with (out/'results.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.writer(handle)
-        writer.writerow(['image','date','dm','ab','time','confidence','angle_deviation_deg','result','error','processing_ms'])
+        headers=['image','date','dm','ab','time','confidence']
+        if include_alignment:headers.append('angle_deviation_deg')
+        writer.writerow([*headers,'result','error','processing_ms'])
         for r in records:
             v=r['validation']; p=v.get('parsed') or {}
-            writer.writerow([r['image'],p.get('nsx_raw'),p.get('dm'),p.get('ab'),p.get('time'),
-                             v.get('overall_confidence'),(r.get('alignment') or {}).get('deviation'),
-                             v['result'],v['error_reason'],r['processing_ms']])
+            values=[r['image'],p.get('nsx_raw'),p.get('dm'),p.get('ab'),p.get('time'),
+                    v.get('overall_confidence')]
+            if include_alignment:values.append((r.get('alignment') or {}).get('deviation'))
+            writer.writerow([*values,v['result'],v['error_reason'],r['processing_ms']])
 
 
 def main():

@@ -4,6 +4,7 @@ from .preprocessing import preprocess, LayoutError
 from .validator import validate, is_confidence
 
 FIELD_ORDER=('nsx_anchor','date','dm_anchor','dm','ab','time')
+DEFAULT_DEADLINE_MS=100
 
 
 def candidate_raw(readings):
@@ -23,7 +24,7 @@ def choose_candidate(candidates,minimum):
     return selected,len(signatures)>1,score(selected)
 
 
-def inspect_image(image,roi,engine,expected,deadline_ms=100,*,prefer_gray=False):
+def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,prefer_gray=False):
     started=time.perf_counter()
     report={'candidates':[], 'ocr_device':str(getattr(engine,'device','unknown')),
         'expected':dict(ab=expected.ab,dm=expected.dm,
@@ -54,10 +55,13 @@ def inspect_image(image,roi,engine,expected,deadline_ms=100,*,prefer_gray=False)
             padding,gap=(2,12) if numeric_variant=='gray' else (6,18)
             if prefer_gray:
                 padding=6
-            readings={field:asdict(value) for field,value in
-                      engine.read_fields_fast(variants['gray'],fields,variants[numeric_variant],
-                                              variants['otsu'],variants[dm_variant],
-                                              padding,gap).items()}
+            inputs=(variants['gray'],fields,variants[numeric_variant],variants['otsu'],
+                    variants[dm_variant],padding,gap)
+            result=engine.read_fields_fast(*inputs)
+            if (prefer_gray and not result['date'].text
+                    and (time.perf_counter()-started)*1000<deadline_ms*.45):
+                result=engine.read_fields_fast(*inputs,merge_lower_line=True)
+            readings={field:asdict(value) for field,value in result.items()}
             report['candidates'].append(dict(name=f'{numeric_variant}_numeric_fast_1pass',
                 image_variant=numeric_variant,
                 decoder='greedy',fields=readings,raw=candidate_raw(readings)))

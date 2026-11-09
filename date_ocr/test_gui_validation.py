@@ -23,7 +23,7 @@ app=QApplication([])
 window=MainWindow();window.show();app.processEvents()
 window.roi_mode.setCurrentIndex(window.roi_mode.findData('auto'))
 window.trial_ab.setText('13');window.trial_dm.setCurrentText('1');window.threshold.setValue(.70)
-window.max_angle.setValue(3.0);window.trial_date.setDate(QDate(2026,8,22))
+window.trial_date.setDate(QDate(2026,8,22))
 data=ROOT/'data/validation/testdate_20260906'
 truth=json.loads((data/'manifest.json').read_text(encoding='utf-8'))
 jobs=[(data/name,None,'auto') for name in truth]
@@ -42,26 +42,23 @@ def done():
             for name,expected in truth.items():
                 if expected['expected_result']=='PASS':
                     assert reports[name]['validation']['raw']==expected['raw'],name
-                    assert reports[name]['alignment']['passed'],name
+                    assert 'alignment' not in reports[name],name
             assert len(ticks)>5,len(ticks)
             window.grab().save(str(ROOT/'data/debug/gui_validation.png'))
-            phase['value']='angle_fail';window.max_angle.setValue(.5)
+            phase['value']='deadline_fail';window.deadline_ms.setValue(1)
             failing_name=next(name for name in truth if name.startswith('1788666718633'))
             QTimer.singleShot(0,lambda:window.begin([(data/failing_name,None,'auto')]))
             return
         assert len(window.rows)==1
         report=window.rows[0][0]
-        assert report['validation']['result']=='FAIL_DATE_ALIGNMENT',report['validation']
-        assert report['alignment']['deviation']>.5
-        assert report['deadline_met']
-        window.tabs.setCurrentIndex(2);app.processEvents()
-        window.grab().save(str(ROOT/'data/debug/gui_angle_fail.png'))
+        assert report['validation']['result']=='FAIL_DEADLINE',report['validation']
+        assert report['deadline_ms']==1 and not report['deadline_met']
+        assert 'alignment' not in report
         (ROOT/'data/debug/gui_validation.json').write_text(json.dumps({
             'images':13,'pass':12,'expected_reject':1,'deadline_met':13,
-            'angle_fail_gate':'passed','forced_limit_degrees':.5,
-            'measured_deviation_degrees':report['alignment']['deviation'],
+            'deadline_gate':'passed','forced_limit_ms':1,
             'ui_heartbeat_ticks':len(ticks)},indent=2),encoding='utf-8')
-        print('GUI_VALIDATION_PASS',len(ticks),'ANGLE_FAIL_PASS',flush=True)
+        print('GUI_VALIDATION_PASS',len(ticks),'DEADLINE_FAIL_PASS',flush=True)
     except Exception:
         import traceback
         traceback.print_exc();app.exit(1);return
