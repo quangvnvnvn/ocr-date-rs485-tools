@@ -16,6 +16,7 @@ from ocr.preprocessing import detect_dark_right_edge, locate_inkjet_rows
 from ocr.validator import Expected
 from roi.auto_roi import AutoROIDetector
 from roi.fixed_roi import FixedROI
+from roi.guided_roi import GuidedROIDetector
 
 
 class InspectionRuntime:
@@ -26,13 +27,16 @@ class InspectionRuntime:
         self.auto_detector = None
         self.camera_detector = None
         self.calibrated_serial = None
+        self.guided_detector = None
 
-    def prepare(self, require_auto_roi: bool = False, status=None) -> None:
+    def prepare(self, require_auto_roi: bool = False, status=None, *, require_guided_roi=False) -> None:
         if self.engine is None:
             if status:
                 status("Đang nạp và làm nóng OCR…")
             from ocr.ocr_engine import EasyOCREngine
             self.engine = EasyOCREngine()
+        if require_guided_roi and self.guided_detector is None:
+            self.guided_detector = GuidedROIDetector(ROOT / "data/calibration")
         if require_auto_roi and self.auto_detector is None:
             if status:
                 status("Đang nạp bộ bám ROI tự động…")
@@ -91,6 +95,7 @@ class InspectionRuntime:
             auto_result = None
             camera_match = False
             auto_ms = 0.0
+            search_bbox = None
             alignment_image = None
             alignment_height = None
             if roi_mode == "auto":
@@ -123,6 +128,18 @@ class InspectionRuntime:
                     roi = None
             else:
                 inspection_image = image
+            if roi_mode == "guided" and roi is not None:
+                if self.guided_detector is None:
+                    raise RuntimeError("Bộ tìm mã trong vùng khoanh chưa được nạp")
+                x, y, width, height = search_bbox = roi.bounds(image.shape)
+                guided_started = time.perf_counter()
+                found = self.guided_detector.detect(image[y:y+height, x:x+width])
+                guided_ms = (time.perf_counter()-guided_started)*1000
+                roi = None
+                if found is not None:
+                    left, top, width, height = found
+                    ih, iw = image.shape[:2]
+                    roi = FixedROI(x+left, y+top, width, height, iw, ih)
 
             compact_roi = False
             if roi_mode == "fixed" and roi is not None and not check_alignment:
@@ -130,8 +147,14 @@ class InspectionRuntime:
                 compact_roi = height <= width*.45
             report, artifacts = inspect_image(
                 inspection_image, roi, self.engine, expected, deadline_ms,
-                allow_unrotated=compact_roi,
+                prefer_gray=roi_mode=="guided",
+                allow_unrotated=compact_roi or (roi_mode=="guided" and not check_alignment),
             )
+            if search_bbox is not None:
+                report["search_bbox"] = search_bbox
+                report["stage_ms"]["guided_roi"] = round(guided_ms, 2)
+                if roi is None:
+                    report["validation"]["error_reason"] = "Không tìm thấy cặp chữ NSX và DM trong vùng đã khoanh."
             if (roi_mode == "fixed" or camera_match) and roi is not None:
                 refined = False
                 for _ in range(2):

@@ -21,6 +21,11 @@ AUTO ROI dùng mẫu hiệu chuẩn riêng khi serial camera khớp với
 `reference.png`, vùng tìm mã và vùng chữ in cần bỏ qua khi khớp đặc trưng.
 Khi chuyển máy và vẫn dùng cùng trạm, sao chép cả thư mục hiệu chuẩn.
 
+Mở một ảnh mẫu của camera hoặc chụp thử bằng chế độ đang dùng. Sau đó chọn
+**Cài đặt → Chế độ ROI → Tự tìm trong vùng khoanh** và bấm **Khoanh vùng tìm mã**.
+Khoanh đủ khoảng mà hai dòng mã có thể xuất hiện, rồi bấm **Lưu vùng**.
+Khung xanh dương nét đứt là vùng tìm, khung xanh lá nét liền là vùng OCR.
+
 ## Chế độ quyết định 100 ms
 
 Luồng mặc định dùng ONNX Runtime CPU 4 luồng, không cần GPU rời/CUDA/PyTorch,

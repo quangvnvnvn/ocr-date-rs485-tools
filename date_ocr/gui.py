@@ -45,8 +45,11 @@ RESULT_TEXT = {
 def result_text(report):
     code=report['validation']['result']
     title,reason=RESULT_TEXT.get(code,('Lỗi kiểm tra','Xem chi tiết OCR để kiểm tra lỗi.'))
-    if code=='FAIL_ROI_NOT_FOUND' and (report.get('auto_roi') or {}).get('found') is False:
-        return title,'Không bám được mẫu bao bì để xác định vị trí hai dòng mã.'
+    if code=='FAIL_ROI_NOT_FOUND':
+        if report.get('search_bbox') and not report.get('bbox'):
+            return title,'Không tìm thấy cặp chữ NSX và DM trong vùng đã khoanh.'
+        if (report.get('auto_roi') or {}).get('found') is False:
+            return title,'Không bám được mẫu bao bì để xác định vị trí hai dòng mã.'
     return title,reason.format(deadline=report.get('deadline_ms',DEFAULT_DEADLINE_MS))
 
 
@@ -68,10 +71,10 @@ def optimize_process_priority():
 class ImageView(QWidget):
     selected=Signal(object)
     def __init__(self):
-        super().__init__(); self.image=None; self.roi=None; self.selecting=False; self.start=None; self.end=None
+        super().__init__(); self.image=None; self.roi=None; self.search_roi=None; self.selecting=False; self.start=None; self.end=None
         self.setMinimumSize(250,90)
-    def set_image(self,image,roi=None):
-        self.image=image; self.roi=roi; self.update()
+    def set_image(self,image,roi=None,*,search_roi=None):
+        self.image=image; self.roi=roi; self.search_roi=search_roi; self.update()
     def rect_image(self):
         if self.image is None:return QRectF()
         h,w=self.image.shape[:2]; scale=min(self.width()/w,self.height()/h)
@@ -84,10 +87,13 @@ class ImageView(QWidget):
         if a.ndim==2:q=QImage(a.data,a.shape[1],a.shape[0],a.strides[0],QImage.Format_Grayscale8)
         else:q=QImage(a.data,a.shape[1],a.shape[0],a.strides[0],QImage.Format_BGR888)
         area=self.rect_image(); p.drawImage(area,q)
+        sx=area.width()/a.shape[1]; sy=area.height()/a.shape[0]
+        for roi,color,style in ((self.search_roi,'#1672c5',Qt.DashLine),(self.roi,'#08a65c',Qt.SolidLine)):
+            if roi:
+                p.setPen(QPen(QColor(color),2,style))
+                x,y,w,h=roi.bounds(a.shape)
+                p.drawRect(QRectF(area.x()+x*sx,area.y()+y*sy,w*sx,h*sy))
         p.setPen(QPen(QColor('#08a65c'),2))
-        if self.roi:
-            x,y,w,h=self.roi.bounds(a.shape); sx=area.width()/a.shape[1]; sy=area.height()/a.shape[0]
-            p.drawRect(QRectF(area.x()+x*sx,area.y()+y*sy,w*sx,h*sy))
         if self.start is not None and self.end is not None:p.drawRect(QRectF(self.start,self.end).normalized())
     def mousePressEvent(self,event):
         if self.selecting and self.image is not None and self.rect_image().contains(event.position()):
@@ -118,7 +124,8 @@ class OCRWorker(QThread):
     def run(self):
         records=[]
         try:
-            self.runtime.prepare(any(mode=='auto' for _,_,mode in self.jobs),self.status.emit)
+            self.runtime.prepare(any(mode=='auto' for _,_,mode in self.jobs),self.status.emit,
+                                 require_guided_roi=any(mode=='guided' for _,_,mode in self.jobs))
             self.output=ROOT/'data/debug'/('gui_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:6])
             self.output.mkdir(parents=True)
             for i,(path,roi,roi_mode) in enumerate(self.jobs):
@@ -160,7 +167,10 @@ class CameraWorker(QThread):
         records=[];daily_log=None
         try:
             capture_once=self.manual_trigger or self.sensor_test
-            self.runtime.prepare(self.roi_mode=='auto' or capture_once,self.status.emit)
+            if self.roi_mode=='guided':
+                self.runtime.prepare(False,self.status.emit,require_guided_roi=True)
+            else:
+                self.runtime.prepare(self.roi_mode=='auto' or capture_once,self.status.emit)
             if self.eject_settings is not None and self.eject_settings.enabled:
                 if not isinstance(self.source,HikrobotMvsSource):
                     raise EjectorError('Chỉ cho phép đẩy thật với camera Hikrobot trigger ngoài')
@@ -469,7 +479,11 @@ class MainWindow(QMainWindow):
         settings.addWidget(QLabel('DM:'));self.dm=QComboBox();self.dm.addItems(['1','2','3']);settings.addWidget(self.dm)
         settings.addWidget(QLabel('Ngưỡng tin cậy:'));self.threshold=QDoubleSpinBox();self.threshold.setRange(.01,1);self.threshold.setSingleStep(.01);self.threshold.setValue(.8);settings.addWidget(self.threshold)
         self.threshold.setToolTip('Mỗi trường phải đạt ngưỡng này. Không hạ ngưỡng để ép kết quả ĐẠT.')
-        settings.addWidget(QLabel('Chế độ ROI:'));self.roi_mode=QComboBox();self.roi_mode.addItem('Tự động (khuyên dùng)','auto');self.roi_mode.addItem('Cố định / khoanh tay','fixed');settings.addWidget(self.roi_mode)
+        settings.addWidget(QLabel('Chế độ ROI:'));self.roi_mode=QComboBox()
+        self.roi_mode.addItem('Tự động theo mẫu bao bì','auto')
+        self.roi_mode.addItem('Cố định / khoanh tay','fixed')
+        self.roi_mode.addItem('Tự tìm trong vùng khoanh','guided')
+        settings.addWidget(self.roi_mode)
         self.check_date=QCheckBox();self.check_date.setChecked(True);self.check_date.hide()
         self.nsx_label=QLabel('Ngày NSX cần kiểm tra:');settings.addWidget(self.nsx_label)
         self.date=QDateEdit(QDate.currentDate());self.date.setCalendarPopup(True);self.date.setDisplayFormat('dd/MM/yyyy');settings.addWidget(self.date);settings.addStretch()
@@ -495,7 +509,7 @@ class MainWindow(QMainWindow):
         excel_button=QPushButton('Mở Excel hôm nay');excel_button.clicked.connect(self.open_daily_excel);excel_bar.addWidget(excel_button)
         self.roi_mode.currentIndexChanged.connect(self.roi_mode_changed)
         roi_bar=QHBoxLayout();function_block(configuration,'roiBlock').addLayout(roi_bar)
-        self.select_roi_button=button('2. Khoanh vùng DATE',self.select_roi,roi_bar)
+        self.select_roi_button=button('2. Khoanh vùng tìm mã',self.select_roi,roi_bar)
         self.save_roi_button=button('Lưu vùng',self.save_roi,roi_bar)
         self.reset_roi_button=button('Xóa vùng',self.reset_roi,roi_bar)
         self.coords=QLabel('');roi_bar.addWidget(self.coords);roi_bar.addStretch()
@@ -514,7 +528,7 @@ class MainWindow(QMainWindow):
         self.path_label=QLabel('Chọn ảnh để bắt đầu');self.path_label.setObjectName('fileLabel');layout.addWidget(self.path_label)
         split=QSplitter(Qt.Horizontal);self.image_split=split;layout.addWidget(split,1)
         left=QWidget();left.setObjectName('imagePanel');ll=QVBoxLayout(left)
-        image_label=QLabel('ẢNH SẢN PHẨM  ·  Khung xanh là vùng kiểm tra');image_label.setObjectName('sectionLabel');ll.addWidget(image_label)
+        image_label=QLabel('ẢNH SẢN PHẨM  ·  Nét đứt: vùng tìm  ·  Nét liền: vùng đọc');image_label.setObjectName('sectionLabel');ll.addWidget(image_label)
         self.original=ImageView();self.original.selected.connect(self.roi_selected);ll.addWidget(self.original,1);split.addWidget(left)
         right=QWidget();right.setObjectName('resultPanel');rl=QVBoxLayout(right)
         self.banner=QLabel('SẴN SÀNG');self.banner.setStyleSheet('font-size:24px;font-weight:bold;padding:10px;background:#dae9f0');rl.addWidget(self.banner)
@@ -645,7 +659,7 @@ class MainWindow(QMainWindow):
             try:self.current_eject_settings().validate()
             except (ValueError,EjectorError) as exc:
                 self.show_status('Không thể lưu bộ đẩy: '+str(exc));return
-        if self.roi_mode.currentData()=='fixed':
+        if self.roi_mode.currentData() in ('fixed','guided'):
             self.config['fixed_roi']=self.roi.to_dict() if self.roi else None
         self.save_operator_settings()
         self.save_config_button.setText('ĐÃ LƯU ✓')
@@ -676,19 +690,19 @@ class MainWindow(QMainWindow):
             self.camera_state.setText('ẢNH TĨNH' if mode=='static' else 'CHƯA ARM')
             self.camera_state.setStyleSheet('font-weight:700;color:#596b7a')
     def roi_mode_changed(self):
-        fixed=self.roi_mode.currentData()=='fixed'
-        self.select_roi_button.setEnabled(fixed);self.save_roi_button.setEnabled(fixed);self.reset_roi_button.setEnabled(fixed)
-        if fixed:self.update_roi()
+        manual=self.roi_mode.currentData() in ('fixed','guided')
+        self.select_roi_button.setEnabled(manual);self.save_roi_button.setEnabled(manual);self.reset_roi_button.setEnabled(manual)
+        if manual:self.update_roi()
         else:
             self.coords.setText('AUTO ROI sẽ tự bám theo mẫu bao bì khi kiểm tra')
-            self.original.roi=None;self.original.update()
+            self.original.roi=None;self.original.search_roi=None;self.original.update()
             self.show_status('AUTO ROI đang bật • Không cần khoanh vùng bằng tay')
     def toggle_debug(self,enabled):
         for index in range(2,self.tabs.count()):self.tabs.setTabVisible(index,enabled)
     def show_status(self,text):self.status.setText(text)
     def clear_result(self):
         self.banner.setText('SẴN SÀNG KIỂM TRA');self.banner.setStyleSheet('font-size:22px;font-weight:bold;padding:10px;border-radius:6px;background:#e5f0f7;color:#315c76')
-        self.details.setHtml('<p style="color:#536d80">Kiểm tra mã AB / DM rồi bấm <b>KIỂM TRA OCR</b>. AUTO ROI sẽ tự tìm hai dòng DATE.</p><p>Kết quả và thời gian xử lý sẽ hiển thị tại đây.</p>')
+        self.details.setHtml('<p style="color:#536d80">Chọn ngày NSX, mã AB và DM rồi bấm <b>KIỂM TRA OCR</b>.</p><p>Kết quả và thời gian xử lý sẽ hiển thị tại đây.</p>')
         self.debug_text.clear()
         for view in self.views.values():view.set_image(None)
     def load_path(self,path,use_sample=False):
@@ -697,15 +711,24 @@ class MainWindow(QMainWindow):
         self.roi=FixedROI.from_dict(value) if value else None
         self.original.set_image(image,self.roi);self.path_label.setText('Ảnh đang mở: '+path.name);self.path_label.setToolTip(str(path));self.clear_result();self.update_roi()
     def update_roi(self):
+        mode=self.roi_mode.currentData()
         if self.roi:
-            x,y,w,h=self.roi.bounds(self.image.shape);self.coords.setText(f'Vùng DATE: {w} × {h} px  ·  X {x} / Y {y}')
-        else:self.coords.setText('Chưa chọn vùng DATE')
-        display_roi=self.roi if self.roi_mode.currentData()=='fixed' else None
-        self.original.roi=display_roi;self.original.update()
-        if display_roi and self.image is not None:self.views['roi'].set_image(display_roi.crop(self.image))
-    def roi_selected(self,roi):self.roi=roi;self.clear_result();self.update_roi();self.show_status('Đã chọn ROI. Bấm LƯU CẤU HÌNH để dùng lần sau.')
+            x,y,w,h=self.roi.bounds(self.image.shape)
+            label='Vùng tìm mã' if mode=='guided' else 'Vùng DATE'
+            self.coords.setText(f'{label} · {w} × {h} px  ·  X {x} / Y {y}')
+        else:self.coords.setText('Chưa khoanh vùng tìm mã')
+        self.original.roi=self.roi if mode=='fixed' else None
+        self.original.search_roi=self.roi if mode=='guided' else None
+        self.original.update()
+        if mode=='guided':self.views['roi'].set_image(None)
+        elif self.original.roi and self.image is not None:self.views['roi'].set_image(self.roi.crop(self.image))
+    def roi_selected(self,roi):self.roi=roi;self.clear_result();self.update_roi();self.show_status('Đã chọn vùng. Bấm LƯU VÙNG để dùng lần sau.')
     def select_roi(self):
-        if self.image is not None:self.original.selecting=True;self.original.setCursor(Qt.CrossCursor);self.show_status('Kéo chuột bao quanh đúng hai dòng DATE trên ảnh gốc.')
+        if self.image is not None:
+            self.original.selecting=True;self.original.setCursor(Qt.CrossCursor)
+            self.show_status('Khoanh đủ vị trí hai dòng mã có thể xuất hiện khi vỉ dịch.'
+                             if self.roi_mode.currentData()=='guided' else
+                             'Kéo chuột bao quanh hai dòng DATE trên ảnh gốc.')
     def save_roi(self):
         if not self.roi:return self.show_status('Chưa có ROI để lưu.')
         self.config['fixed_roi']=self.roi.to_dict();self.save_operator_settings();self.show_status('Đã lưu ROI và cấu hình hiện tại.')
@@ -721,7 +744,7 @@ class MainWindow(QMainWindow):
         if name:self.begin([(p,self.roi,self.roi_mode.currentData()) for p in sorted(Path(name).iterdir()) if p.suffix.lower() in EXTENSIONS])
     def samples(self):
         mode=self.roi_mode.currentData()
-        self.begin([(ROOT/'data/test_images'/name,FixedROI.from_dict(value) if mode=='fixed' else None,mode) for name,value in self.manifest.items()])
+        self.begin([(ROOT/'data/test_images'/name,FixedROI.from_dict(value) if mode=='fixed' else self.roi,mode) for name,value in self.manifest.items()])
     def run_image(self):
         if self.path:self.begin([(self.path,self.roi,self.roi_mode.currentData())])
     def current_expected(self,*,trial=False):
@@ -732,7 +755,8 @@ class MainWindow(QMainWindow):
         if self.worker.isRunning() or self.camera_worker.isRunning() or self.live_worker.isRunning() or not jobs:return
         try:expected=self.current_expected(trial=True)
         except ValueError as exc:return QMessageBox.warning(self,'Kiểm tra thiết lập',str(exc))
-        if any(mode=='fixed' and roi is None for _,roi,mode in jobs):return QMessageBox.warning(self,'Thiếu ROI','Hãy khoanh vùng DATE trước khi kiểm tra.')
+        if any(mode in ('fixed','guided') and roi is None for _,roi,mode in jobs):
+            return QMessageBox.warning(self,'Thiếu ROI','Hãy khoanh vùng tìm mã trước khi kiểm tra.')
         self.save_operator_settings()
         self.clear_result();self.banner.setText('ĐANG ĐỌC…');self.controls.setEnabled(False);self.original.selecting=False
         self.history.setEnabled(False);self.stop.setEnabled(True);self.rows=[];self.history.setRowCount(0)
@@ -757,9 +781,9 @@ class MainWindow(QMainWindow):
         except (ValueError,EjectorError) as exc:
             return QMessageBox.warning(self,'Thiết lập RS485',str(exc))
         roi_mode=self.roi_mode.currentData()
-        if roi_mode=='fixed' and self.roi is None:
-            if not capture_once:
-                return QMessageBox.warning(self,'Thiếu ROI','Hãy mở một ảnh chuẩn và khoanh vùng DATE trước khi ARM camera.')
+        if roi_mode in ('fixed','guided') and self.roi is None:
+            if roi_mode=='guided' or not capture_once:
+                return QMessageBox.warning(self,'Thiếu ROI','Hãy mở một ảnh chuẩn và khoanh vùng tìm mã trước khi kết nối camera.')
             roi_mode='auto'
         if mode=='hikrobot':
             source=HikrobotMvsSource(self.camera_serial.text(),self.trigger_line.currentText(),
@@ -998,7 +1022,9 @@ class MainWindow(QMainWindow):
             self.image=record_image
             bbox=report.get('bbox')
             display_roi=FixedROI(*bbox,self.image.shape[1],self.image.shape[0]) if bbox else None
-            self.original.set_image(self.image,display_roi)
+            search_bbox=report.get('search_bbox')
+            search_roi=FixedROI(*search_bbox,self.image.shape[1],self.image.shape[0]) if search_bbox else None
+            self.original.set_image(self.image,display_roi,search_roi=search_roi)
         elif report.get('production'):
             self.original.set_image(None)
         for name,view in self.views.items():

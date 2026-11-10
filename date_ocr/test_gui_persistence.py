@@ -68,5 +68,14 @@ assert second.exposure_us.value()==800
 assert second.roi is not None and second.roi.x==700 and second.roi.width==600
 assert second.path.resolve()==last_image.resolve()
 second.grab().save(str(ROOT/'data/debug/gui_persistence.png'))
-second.close();app.quit()
+second.roi_mode.setCurrentIndex(second.roi_mode.findData('guided'))
+search_area=FixedROI(500,750,1050,550,1926,2568)
+second.roi_selected(search_area)
+second.save_roi()
+second.close()
+
+third=MainWindow()
+assert third.roi_mode.currentData()=='guided'
+assert third.original.search_roi==search_area and third.original.roi is None
+third.close();app.quit()
 print('GUI_PERSISTENCE_PASS',flush=True)
