@@ -26,15 +26,25 @@ Mở một ảnh mẫu của camera hoặc chụp thử bằng chế độ đang
 Khoanh đủ khoảng mà hai dòng mã có thể xuất hiện, rồi bấm **Lưu vùng**.
 Khung xanh dương nét đứt là vùng tìm, khung xanh lá nét liền là vùng OCR.
 
+Trong chế độ **Tự tìm trong vùng khoanh**, PP-OCRv5 Mobile đọc nguyên hai dòng
+trong một lượt ONNX CPU. Bộ đọc kiểm tra định dạng và độ tin cậy của từng trường
+trước khi đối chiếu ngày NSX, DM và AB. EasyOCR là đường dự phòng khi PP-OCR
+không đọc được chuỗi đủ tin cậy hoặc khi thiếu model. Kết quả dùng PP-OCR hiển thị
+**PP-OCR · CPU** trong phần thời gian xử lý.
+
+Cài model một lần từ thư mục `date_ocr` bằng `./tools/fetch_ppocr_model.ps1`.
+Bản portable mới kèm model đã kiểm tra SHA256. Khi chạy kiểm tra, model đọc
+offline từ `data/models`. [Model tiếng Anh của PaddleOCR](https://www.paddleocr.ai/main/en/version3.x/module_usage/text_recognition.html)
+được dùng qua [bản chuyển ONNX của RapidOCR](https://github.com/RapidAI/RapidOCR/blob/main/python/rapidocr/default_models.yaml).
+
 ## Chế độ quyết định 100 ms
 
-Luồng mặc định dùng ONNX Runtime CPU 4 luồng, không cần GPU rời/CUDA/PyTorch,
-phù hợp cấu hình mục tiêu Core i5 Gen 8 và RAM 8 GB. Hạn chót mặc định là 100 ms,
-tính từ lúc nhận ảnh đến khi có kết quả. Có thể đổi và lưu tại
-**Cài đặt → Giới hạn xử lý**. Bám ROI chạy trên ảnh thu nhỏ,
-vùng DATE được nắn phối cảnh về đúng chiều, góc chữ được tìm bằng hình học nét in
-và bốn trường số được ghép theo vị trí đã hiệu chuẩn để mô hình OCR chỉ chạy một lần. NSX/DM cố định được xác nhận bằng HOG từ ảnh hiệu
-chuẩn. Công cụ dòng lệnh hỗ trợ so sánh góc DATE với mép dải tối. Giao diện
+Luồng ONNX Runtime chạy trên CPU, dùng 2 luồng cho PP-OCR và 4 luồng mặc định
+cho bộ đọc từng trường. Hạn chót mặc định là 100 ms, tính từ lúc nhận ảnh đến
+khi có kết quả. Có thể đổi và lưu tại **Cài đặt → Giới hạn xử lý**.
+Trong bộ đọc từng trường, bốn trường số được ghép để chạy mô hình một lần,
+còn chữ NSX/DM được xác nhận bằng HOG từ ảnh hiệu chuẩn.
+Công cụ dòng lệnh hỗ trợ so sánh góc DATE với mép dải tối. Giao diện
 vận hành bỏ qua phép đo này. Bộ dò góc dòng lệnh
 bắt buộc một phía của mép phải là mảng tối rộng, nên không nhận nhầm viền bao bì,
 nét chữ hoặc đường minh họa mảnh làm chuẩn.

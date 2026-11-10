@@ -1,6 +1,7 @@
 from dataclasses import asdict
 import time
 from .preprocessing import preprocess, LayoutError
+from .ppocr import read_stamp
 from .validator import validate, is_confidence
 
 FIELD_ORDER=('nsx_anchor','date','dm_anchor','dm','ab','time')
@@ -25,7 +26,7 @@ def choose_candidate(candidates,minimum):
 
 
 def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,prefer_gray=False,
-                  allow_unrotated=False):
+                  allow_unrotated=False,line_reader=None):
     started=time.perf_counter()
     report={'candidates':[], 'ocr_device':str(getattr(engine,'device','unknown')),
         'expected':dict(ab=expected.ab,dm=expected.dm,
@@ -44,44 +45,62 @@ def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,pr
             raise LayoutError(str(exc)) from exc
         report['bbox']=roi.bounds(image.shape)
         artifacts['roi']=crop
-        stage=time.perf_counter()
-        variants,fields,metrics=preprocess(crop,allow_unrotated=allow_unrotated)
-        prefer_gray=prefer_gray or metrics['angle'] is None
-        report['stage_ms']['preprocess']=round((time.perf_counter()-stage)*1000,2)
-        artifacts.update(variants)
-        report.update(metrics=metrics,field_boxes=fields)
-        stage=time.perf_counter()
-        if hasattr(engine,'read_fields_fast'):
-            numeric_variant='gray' if prefer_gray else metrics['numeric_variant']
-            dm_variant='gray' if prefer_gray else metrics['dm_variant']
-            padding,gap=(2,12) if numeric_variant=='gray' else (6,18)
-            if prefer_gray:
-                padding=6
-            inputs=(variants['gray'],fields,variants[numeric_variant],variants['otsu'],
-                    variants[dm_variant],padding,gap)
-            result=engine.read_fields_fast(*inputs)
-            readings={field:asdict(value) for field,value in result.items()}
-            report['candidates'].append(dict(name=f'{numeric_variant}_numeric_fast_1pass',
-                image_variant=numeric_variant,
-                decoder='greedy',fields=readings,raw=candidate_raw(readings)))
-            if (prefer_gray and result['date'].confidence<expected.minimum_confidence
-                    and (time.perf_counter()-started)*1000<deadline_ms*.45):
-                numeric=engine.read_numeric_fields(variants['gray'],variants['otsu'],fields,
-                                                   expected.minimum_confidence)
-                readings={**readings,**{field:asdict(value) for field,value in numeric.items()}}
-                report['candidates'].append(dict(name='numeric_independent_fields',
-                    image_variant='gray',decoder='greedy',fields=readings,raw=candidate_raw(readings)))
-        else:
-            # Compatibility path for test doubles and alternate OCR engines.
-            report['ocr_mode']='COMPATIBILITY'
-            for image_variant in ('gray','otsu'):
-                for decoder in ('greedy','beamsearch'):
-                    readings={field:asdict(engine.read_field(variants[image_variant][t:b,l:r],field,decoder))
-                              for field,(l,t,r,b) in fields.items()}
-                    candidate={'name':f'{image_variant}_{decoder}','image_variant':image_variant,
-                               'decoder':decoder,'fields':readings,'raw':candidate_raw(readings)}
-                    report['candidates'].append(candidate)
-        report['stage_ms']['ocr']=round((time.perf_counter()-stage)*1000,2)
+        if line_reader is not None:
+            stage=time.perf_counter()
+            try:
+                raw,readings,variants,metrics=read_stamp(line_reader,crop)
+                confident=bool(readings) and all(
+                    is_confidence(value['confidence']) and value['confidence']>=expected.minimum_confidence
+                    for value in readings.values())
+                report['ppocr_attempt']=dict(raw=raw,fields=readings,accepted=confident)
+                if confident:
+                    report['ocr_mode']='PP_OCR_LINES'
+                    report['metrics']=metrics
+                    artifacts.update(variants)
+                    report['candidates'].append(dict(name='ppocr_v5_lines',image_variant='clahe',
+                        decoder='greedy',fields=readings,raw=raw))
+            except LayoutError as exc:
+                report['ppocr_attempt']=dict(accepted=False,error_reason=str(exc))
+            report['stage_ms']['ppocr']=round((time.perf_counter()-stage)*1000,2)
+        if not report['candidates']:
+            stage=time.perf_counter()
+            variants,fields,metrics=preprocess(crop,allow_unrotated=allow_unrotated)
+            prefer_gray=prefer_gray or metrics['angle'] is None
+            report['stage_ms']['preprocess']=round((time.perf_counter()-stage)*1000,2)
+            artifacts.update(variants)
+            report.update(metrics=metrics,field_boxes=fields)
+            stage=time.perf_counter()
+            if hasattr(engine,'read_fields_fast'):
+                numeric_variant='gray' if prefer_gray else metrics['numeric_variant']
+                dm_variant='gray' if prefer_gray else metrics['dm_variant']
+                padding,gap=(2,12) if numeric_variant=='gray' else (6,18)
+                if prefer_gray:
+                    padding=6
+                inputs=(variants['gray'],fields,variants[numeric_variant],variants['otsu'],
+                        variants[dm_variant],padding,gap)
+                result=engine.read_fields_fast(*inputs)
+                readings={field:asdict(value) for field,value in result.items()}
+                report['candidates'].append(dict(name=f'{numeric_variant}_numeric_fast_1pass',
+                    image_variant=numeric_variant,
+                    decoder='greedy',fields=readings,raw=candidate_raw(readings)))
+                if (prefer_gray and result['date'].confidence<expected.minimum_confidence
+                        and (time.perf_counter()-started)*1000<deadline_ms*.45):
+                    numeric=engine.read_numeric_fields(variants['gray'],variants['otsu'],fields,
+                                                       expected.minimum_confidence)
+                    readings={**readings,**{field:asdict(value) for field,value in numeric.items()}}
+                    report['candidates'].append(dict(name='numeric_independent_fields',
+                        image_variant='gray',decoder='greedy',fields=readings,raw=candidate_raw(readings)))
+            else:
+                # Compatibility path for test doubles and alternate OCR engines.
+                report['ocr_mode']='COMPATIBILITY'
+                for image_variant in ('gray','otsu'):
+                    for decoder in ('greedy','beamsearch'):
+                        readings={field:asdict(engine.read_field(variants[image_variant][t:b,l:r],field,decoder))
+                                  for field,(l,t,r,b) in fields.items()}
+                        candidate={'name':f'{image_variant}_{decoder}','image_variant':image_variant,
+                                   'decoder':decoder,'fields':readings,'raw':candidate_raw(readings)}
+                        report['candidates'].append(candidate)
+            report['stage_ms']['ocr']=round((time.perf_counter()-stage)*1000,2)
         selected,conflict,score=choose_candidate(report['candidates'],expected.minimum_confidence)
         report['selected']=selected['name']
         artifacts['final']=variants[selected['image_variant']]

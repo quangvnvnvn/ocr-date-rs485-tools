@@ -134,8 +134,8 @@ def _field_groups(components,expected_count,row_height,image_width):
     return groups
 
 
-def _local_ink_layout(corrected):
-    """Locate inkjet text under glare, shadows and printed background art."""
+def _local_ink_rows(corrected):
+    """Group ink components into two rows under uneven illumination."""
     h,w=corrected.shape
     kernel_size=max(15,int(round(h*.075)))
     if kernel_size%2==0:
@@ -168,7 +168,12 @@ def _local_ink_layout(corrected):
         raise LayoutError('Cannot separate the two DATE lines safely')
     rows_components=[ordered[:split_index],ordered[split_index:]]
     rows_components.sort(key=lambda row:np.mean([item['cy'] for item in row]))
+    return np.where(ink>0,0,255).astype(np.uint8),rows_components,median_height
 
+
+def _local_ink_layout(corrected):
+    h,w=corrected.shape
+    binary,rows_components,median_height=_local_ink_rows(corrected)
     fields={};rows=[]
     row_names=(('nsx_anchor','date','dm_anchor','dm'),('ab','time'))
     for components_in_row,names in zip(rows_components,row_names):
@@ -193,7 +198,6 @@ def _local_ink_layout(corrected):
         rows.append((top,bottom))
     if rows[1][0]<=rows[0][0] or rows[1][0]-rows[0][1]<-median_height*.25:
         raise LayoutError('DATE lines overlap unexpectedly')
-    binary=np.where(ink>0,0,255).astype(np.uint8)
     return binary,fields,rows
 
 
@@ -230,7 +234,7 @@ def _global_threshold_layout(corrected):
     return binary,fields,rows
 
 
-def preprocess(image,*,allow_unrotated=False):
+def _deskew(image,allow_unrotated):
     if image is None or image.size==0 or min(image.shape[:2])<32:
         raise LayoutError('Empty or too small ROI')
     gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY) if image.ndim==3 else image.copy()
@@ -246,6 +250,32 @@ def preprocess(image,*,allow_unrotated=False):
     if angle is not None:
         matrix=cv2.getRotationMatrix2D((w/2,h/2),angle,1)
         corrected=cv2.warpAffine(gray,matrix,(w,h),borderValue=255)
+    return corrected,angle
+
+
+def preprocess_lines(image):
+    """Crop whole lines from the tight guided ROI without finding field gaps."""
+    gray,angle=_deskew(image,allow_unrotated=True)
+    binary,components,median_height=_local_ink_rows(gray)
+    left_limit=min(item['x'] for item in components[0])-median_height*.45
+    components[1]=[item for item in components[1] if item['x']+item['width']>left_limit]
+    h,w=gray.shape
+    boxes=[]
+    for row in components:
+        if not row:
+            raise LayoutError('Không tìm thấy đủ hai dòng mã')
+        left=min(item['x'] for item in row)
+        top=min(item['y'] for item in row)
+        right=max(item['x']+item['width'] for item in row)
+        bottom=max(item['y']+item['height'] for item in row)
+        if bottom-top<=15 or bottom-top>=h*.55 or min(left,top,w-right,h-bottom)<4:
+            raise LayoutError('Dòng mã chạm biên hoặc không đủ chiều cao')
+        boxes.append((max(0,left-8),max(0,top-8),min(w,right+8),min(h,bottom+8)))
+    return gray,binary,boxes,angle
+
+
+def preprocess(image,*,allow_unrotated=False):
+    corrected,angle=_deskew(image,allow_unrotated)
     global_layout=_global_threshold_layout(corrected)
     global_layout_clean=global_layout is not None
     if global_layout_clean:

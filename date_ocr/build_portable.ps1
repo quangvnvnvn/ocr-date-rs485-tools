@@ -114,7 +114,8 @@ $packagedConfig | Add-Member -NotePropertyName ejector -NotePropertyValue @{
 $packagedConfig | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $packagedConfigPath -Encoding UTF8
 Copy-Item -LiteralPath `
     (Join-Path $projectRoot "data\models\english_g2_recognizer.onnx"), `
-    (Join-Path $projectRoot "data\models\english_g2_recognizer.json") `
+    (Join-Path $projectRoot "data\models\english_g2_recognizer.json"), `
+    (& (Join-Path $projectRoot "tools\fetch_ppocr_model.ps1")) `
     -Destination (Join-Path $app "data\models")
 Get-ChildItem -LiteralPath (Join-Path $projectRoot "data\test_images") -File |
     Copy-Item -Destination (Join-Path $app "data\test_images")
@@ -122,6 +123,7 @@ Get-ChildItem -LiteralPath (Join-Path $projectRoot "data\calibration") -File |
     Copy-Item -Destination (Join-Path $app "data\calibration")
 Copy-Item -LiteralPath `
     (Join-Path $projectRoot "README.md"), `
+    (Join-Path $projectRoot "PP-OCR-LICENSE.txt"), `
     (Join-Path $projectRoot "HIKROBOT_SETUP.txt") `
     -Destination $app
 

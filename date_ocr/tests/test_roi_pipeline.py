@@ -54,6 +54,36 @@ class ROIAndPipelineTests(unittest.TestCase):
         b={'name':'b','fields':{f:{'text':'different','confidence':.9} for f in FIELD_ORDER}}
         self.assertEqual(choose_candidate([a,b],.8)[0]['name'],'b')
 
+    def test_whole_line_reading_checks_actual_values_and_falls_back_on_low_confidence(self):
+        import json
+        from main import load_image
+
+        root=Path(__file__).resolve().parents[1]
+        roi=FixedROI.from_dict(json.loads((root/'config/sample_rois.json').read_text())['date1.jpg'])
+        image=load_image(root/'data/test_images/date1.jpg')
+
+        class LineReader:
+            dm_confidence=.99
+
+            def read_lines(self,lines):
+                assert len(lines)==2 and lines[0].shape[1]>lines[1].shape[1]
+                return [('NSX 220826 DM 2',[.99]*14+[self.dm_confidence]),
+                        ('12 12:52',[.99]*8)]
+
+        class LegacyReader:
+            def read_field(self,image,field,decoder='greedy'):
+                values=dict(nsx_anchor='NSX',date='220826',dm_anchor='DM',dm='1',ab='12',time='12:52')
+                return FieldReading(values[field],.99)
+
+        reader=LineReader()
+        report,_=inspect_image(image,roi,LegacyReader(),Expected('12',1),line_reader=reader)
+        self.assertEqual(report['validation']['result'],'FAIL_DM')
+        self.assertEqual(report['ocr_mode'],'PP_OCR_LINES')
+        reader.dm_confidence=.4
+        report,_=inspect_image(image,roi,LegacyReader(),Expected('12',1),line_reader=reader)
+        self.assertEqual(report['validation']['result'],'PASS')
+        self.assertFalse(report['ppocr_attempt']['accepted'])
+
     def test_real_sample_geometry_and_fail_gates(self):
         import json
         from main import load_image

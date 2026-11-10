@@ -1045,6 +1045,7 @@ class MainWindow(QMainWindow):
         elapsed=report.get('processing_ms',0);timing_color='#117449' if report.get('deadline_met') else '#b32b30'
         late_text=' · QUÁ GIỚI HẠN' if elapsed>deadline else ''
         device_text='GPU CUDA' if str(report.get('ocr_device','')).startswith('cuda') else 'CPU'
+        if report.get('ocr_mode')=='PP_OCR_LINES':device_text='PP-OCR · CPU'
         auto=report.get('auto_roi');auto_text=(f' &nbsp; | &nbsp; AUTO ROI: <b>{auto["confidence"]:.1%}</b>' if auto and auto.get('found') else '')
         self.details.setHtml(f'<table width="100%" cellpadding="3"><tr>{cells}</tr></table>'
             f'<p style="color:{"#117449" if ok else "#b32b30"}">{reason}</p>'
