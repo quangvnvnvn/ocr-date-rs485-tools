@@ -10,12 +10,14 @@ from PySide6.QtCore import QRegularExpression
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,
     QPushButton,QLabel,QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox,QCheckBox,QDateEdit,
     QFileDialog,QMessageBox,QSplitter,QTabWidget,QTextEdit,QTableWidget,QTableWidgetItem,
-    QHeaderView,QGroupBox,QSizePolicy)
+    QHeaderView,QGroupBox,QSizePolicy,QDialog,QDialogButtonBox)
 from main import load_image, save_image, write_json, save_report, ROOT, EXTENSIONS
 from roi.fixed_roi import FixedROI
 from roi.auto_roi import AutoROIDetector
 from ocr.pipeline import DEFAULT_DEADLINE_MS
 from ocr.validator import Expected
+from ocr.date_parser import parse_date, ParseError
+from ocr.ppocr import CUSTOM_MODEL_NAME
 from inspection_runtime import InspectionRuntime
 from hardware.frame_source import FrameSourceError,missing_frame_count
 from hardware.simulated_source import TriggeredImageSource
@@ -23,6 +25,7 @@ from hardware.hikrobot_mvs import HikrobotMvsSource
 from hardware.rs485_ejector import EjectorSettings, ModbusOutput, TimedEjector, EjectorError
 from gui_theme import apply_theme
 from production_log import DailyProductionLog, now_local
+from training_samples import default_training_directory, save_training_sample, TRAINING_TARGET
 
 
 RESULT_TEXT = {
@@ -163,8 +166,11 @@ class CameraWorker(QThread):
         self.deadline_ms=DEFAULT_DEADLINE_MS
         self.eject_settings=None;self.ejector=None
         self.production=False;self.manual_trigger=False;self.sensor_test=False
+        self.training_directory=default_training_directory()
+        self.training_error=None
     def run(self):
         records=[];daily_log=None
+        self.training_error=None
         try:
             capture_once=self.manual_trigger or self.sensor_test
             if self.roi_mode=='guided':
@@ -254,6 +260,12 @@ class CameraWorker(QThread):
                 # The operator sees the decision before diagnostic files are written.
                 self.result.emit(report,folder,artifacts)
                 if schedule_error:raise EjectorError(str(schedule_error))
+                if capture_once and not self.production:
+                    try:
+                        save_training_sample(self.training_directory,packet.image,artifacts.get('roi'),
+                                             report,captured_at,'trigger_tay' if self.manual_trigger else 'cam_bien')
+                    except (OSError, ValueError, cv2.error) as exc:
+                        self.training_error=f'Lỗi lưu mẫu vào {self.training_directory} · {exc}'
                 if not self.production:
                     for artifact_name,array in artifacts.items():save_image(folder/f'{artifact_name}.png',array)
                     write_json(folder/'result.json',report)
@@ -357,6 +369,7 @@ class MainWindow(QMainWindow):
                                              str(ROOT/'config/config.json')))
         try:self.config=json.loads(self.config_path.read_text(encoding='utf-8'))
         except Exception:self.config={'roi_mode':'fixed','fixed_roi':None}
+        self.training_directory=Path(self.config.get('training_directory') or default_training_directory())
         self.manifest=json.loads((ROOT/'config/sample_rois.json').read_text(encoding='utf-8'))
         self.runtime=InspectionRuntime()
         self.worker=OCRWorker(self.runtime);self.worker.result.connect(self.got_result);self.worker.status.connect(self.show_status)
@@ -522,8 +535,19 @@ class MainWindow(QMainWindow):
         self.sensor_test_button.setToolTip('Chờ tối đa 15 giây ở ngõ Line0/Line1 đã cài. Chụp thử một ảnh và không kích xi lanh.')
         self.sensor_test_button.clicked.connect(lambda:self.connect_camera(sensor_test=True))
         trigger_bar.addWidget(self.sensor_test_button)
+        sample_settings=QHBoxLayout();function_block(configuration,'roiBlock').addLayout(sample_settings)
+        sample_settings.addWidget(QLabel('Thư mục lưu mẫu'))
+        self.training_path=QLineEdit(str(self.training_directory));self.training_path.setReadOnly(True)
+        sample_settings.addWidget(self.training_path,1)
+        button('Chọn thư mục…',self.choose_training_directory,sample_settings)
+        self.training_counts=[]
         for page_layout in (trial,diagnostics):
+            training_bar=QHBoxLayout();page_layout.addLayout(training_bar)
+            count=QLabel();self.training_counts.append(count);training_bar.addWidget(count,1)
+            button('Gán nhãn mẫu',self.label_training_sample,training_bar)
+            button('Mở thư mục mẫu',self.open_training_directory,training_bar)
             disconnect=QPushButton('Ngắt camera');disconnect.clicked.connect(self.disconnect_camera);page_layout.addWidget(disconnect)
+        self.refresh_training_count()
         camera_bar.itemAt(0).widget().hide();self.source_mode.hide()
         self.path_label=QLabel('Chọn ảnh để bắt đầu');self.path_label.setObjectName('fileLabel');layout.addWidget(self.path_label)
         split=QSplitter(Qt.Horizontal);self.image_split=split;layout.addWidget(split,1)
@@ -635,6 +659,7 @@ class MainWindow(QMainWindow):
         self.config['trial_expected_ab']=self.trial_ab.text()
         self.config['trial_expected_dm']=int(self.trial_dm.currentText())
         self.config['roi_mode']=self.roi_mode.currentData()
+        self.config['training_directory']=str(self.training_directory)
         self.config['inspection']={'expected_ab':self.ab.text(),'expected_dm':int(self.dm.currentText()),
             'minimum_confidence':self.threshold.value(),'check_nsx_date':True,
             'expected_date':self.date.date().toString('yyyy-MM-dd'),'deadline_ms':self.deadline_ms.value()}
@@ -799,6 +824,7 @@ class MainWindow(QMainWindow):
         self.camera_worker.production=(mode=='hikrobot' and not capture_once)
         self.camera_worker.manual_trigger=manual_trigger
         self.camera_worker.sensor_test=sensor_test
+        self.camera_worker.training_directory=self.training_directory
         self.camera_worker.deadline_ms=self.deadline_ms.value()
         self.camera_worker.timeout_ms=int(self.config.get('hardware',{}).get('frame_timeout_ms',100))
         self.source_mode.setEnabled(False);self.connect_camera_button.setEnabled(False)
@@ -909,6 +935,10 @@ class MainWindow(QMainWindow):
             label='Đã chụp thử và ngắt camera' if self.camera_worker.manual_trigger or self.camera_worker.sensor_test else 'Đã ngắt camera'
             self.show_status(f'{label} · {self.camera_frames} frame · {passes} đạt · {self.camera_frames-passes} lỗi')
         elif not self.details.toPlainText():self.show_status('Camera đã ngắt.')
+        if self.camera_worker.manual_trigger or self.camera_worker.sensor_test:
+            self.refresh_training_count()
+            if self.camera_worker.training_error:
+                self.show_status(self.camera_worker.training_error)
         if self.closing:self.close()
     def current_eject_settings(self):
         return EjectorSettings(port=self.eject_port.currentText().strip(),baudrate=9600,
@@ -1045,7 +1075,9 @@ class MainWindow(QMainWindow):
         elapsed=report.get('processing_ms',0);timing_color='#117449' if report.get('deadline_met') else '#b32b30'
         late_text=' · QUÁ GIỚI HẠN' if elapsed>deadline else ''
         device_text='GPU CUDA' if str(report.get('ocr_device','')).startswith('cuda') else 'CPU'
-        if report.get('ocr_mode')=='PP_OCR_LINES':device_text='PP-OCR · CPU'
+        if report.get('ocr_mode')=='PP_OCR_LINES':
+            device_text='PP-OCR · CPU'
+            if report.get('ppocr_model')==CUSTOM_MODEL_NAME:device_text+=' · Model đã huấn luyện'
         auto=report.get('auto_roi');auto_text=(f' &nbsp; | &nbsp; AUTO ROI: <b>{auto["confidence"]:.1%}</b>' if auto and auto.get('found') else '')
         self.details.setHtml(f'<table width="100%" cellpadding="3"><tr>{cells}</tr></table>'
             f'<p style="color:{"#117449" if ok else "#b32b30"}">{reason}</p>'
@@ -1066,6 +1098,67 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QUrl
         output=self.camera_worker.output if self.camera_frames else self.worker.output
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(output or ROOT/'data/debug')))
+    def refresh_training_count(self):
+        try:
+            count=sum(1 for _ in self.training_directory.glob('*/sample.json'))
+            caption=f'Mẫu huấn luyện · {count}/{TRAINING_TARGET} ảnh'
+        except OSError:
+            caption='Không đọc được thư mục mẫu'
+        for label in self.training_counts:
+            label.setText(caption)
+            label.setToolTip(str(self.training_directory))
+    def choose_training_directory(self):
+        if self.camera_worker.isRunning():
+            return self.show_status('Ngắt camera trước khi đổi thư mục mẫu.')
+        start=self.training_directory if self.training_directory.is_dir() else default_training_directory().parent
+        selected=QFileDialog.getExistingDirectory(self,'Chọn thư mục lưu mẫu',str(start))
+        if selected:
+            self.training_directory=Path(selected)
+            self.training_path.setText(str(self.training_directory))
+            self.save_operator_settings()
+            self.refresh_training_count()
+    def open_training_directory(self):
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        try:
+            self.training_directory.mkdir(parents=True,exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.training_directory)))
+        except OSError as exc:
+            self.show_status(f'Không mở được thư mục mẫu · {exc}')
+    def label_training_sample(self):
+        try:
+            for path in sorted(self.training_directory.glob('*/sample.json'),reverse=True):
+                sample=json.loads(path.read_text(encoding='utf-8'))
+                if not sample.get('label_text'):
+                    break
+            else:
+                return self.show_status('Chưa có mẫu cần gán nhãn.')
+            preview=path.with_name('roi.png')
+            if not preview.is_file():preview=path.with_name('original.png')
+            image=load_image(preview)
+        except (OSError, ValueError) as exc:
+            return self.show_status(f'Không đọc được mẫu · {exc}')
+        dialog=QDialog(self);dialog.setWindowTitle('Xác nhận chữ in trên mẫu');dialog.resize(740,440)
+        layout=QVBoxLayout(dialog)
+        view=ImageView();view.set_image(image);layout.addWidget(view,1)
+        label=QTextEdit();label.setPlainText(sample.get('ocr_text') or sample.get('ppocr_raw') or '')
+        label.setPlaceholderText('NSX DDMMYY DM 1\nAB HH:MM');label.setMaximumHeight(90)
+        layout.addWidget(label)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Save).setText('Xác nhận nhãn')
+        buttons.button(QDialogButtonBox.Cancel).setText('Hủy');layout.addWidget(buttons)
+        def confirm():
+            try:
+                parsed=parse_date(label.toPlainText().strip())
+                sample['label_text']=f'NSX {parsed.nsx_raw} DM {parsed.dm}\n{parsed.ab} {parsed.time}'
+                write_json(path,sample)
+            except (ParseError, OSError) as exc:
+                QMessageBox.warning(dialog,'Chưa lưu được nhãn',
+                    'Nhập đúng hai dòng chữ in trên ảnh, theo mẫu ở ô nhập.' if isinstance(exc,ParseError) else str(exc))
+                return
+            dialog.accept()
+        buttons.accepted.connect(confirm);buttons.rejected.connect(dialog.reject)
+        if dialog.exec()==QDialog.Accepted:self.show_status(f'Đã lưu nhãn cho mẫu {path.parent.name}.')
     def open_daily_excel(self):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl

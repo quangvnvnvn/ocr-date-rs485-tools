@@ -37,6 +37,31 @@ Bản portable mới kèm model đã kiểm tra SHA256. Khi chạy kiểm tra, m
 offline từ `data/models`. [Model tiếng Anh của PaddleOCR](https://www.paddleocr.ai/main/en/version3.x/module_usage/text_recognition.html)
 được dùng qua [bản chuyển ONNX của RapidOCR](https://github.com/RapidAI/RapidOCR/blob/main/python/rapidocr/default_models.yaml).
 
+## Thu mẫu và huấn luyện PP-OCR
+
+Mỗi lần **Chụp thử** hoặc **Chờ cảm biến · Chụp 1 ảnh** lưu ảnh gốc,
+vùng DATE nếu tìm được, và `sample.json` vào thư mục đã chọn trong
+**Cài đặt → Thư mục lưu mẫu**. Mặc định là `D:\OCR_DATE_Training` nếu có ổ D.
+Bộ đếm hiển thị tiến độ tới 1.000 mẫu và tiếp tục nhận ảnh sau mốc đó.
+Để chuyển máy, sao chép thư mục mẫu và chọn lại vị trí của nó trong Cài đặt.
+
+Dùng **Gán nhãn mẫu** để xem ảnh, sửa chữ đọc sai và xác nhận hai dòng thực tế.
+Nhãn đã xác nhận được lưu trong `label_text`. Chụp các ngày, mã AB, DM và giờ in
+khác nhau để có dữ liệu học và kiểm tra. Từ thư mục mã nguồn `date_ocr`, chạy:
+
+```powershell
+python -m pip install -r requirements.txt -r requirements-training.txt
+python tools/train_ppocr.py
+```
+
+Lệnh đọc thư mục đã lưu trong Cài đặt. Có thể chỉ định thư mục bằng `--folder`.
+Huấn luyện trên CPU chỉ cập nhật lớp nhận dạng CTC của PP-OCR. Những ảnh có
+cùng nội dung in được giữ trong cùng một tập để kiểm tra trên mã in khác.
+Model mới được lưu vào `data/models/en_PP-OCRv5_custom.onnx` khi đọc đúng thêm
+ảnh kiểm tra và vẫn đọc đúng các ảnh bản hiện tại đã đọc được ở ngưỡng đã cài.
+Mở lại OCR DATE ở chế độ **Tự tìm trong vùng khoanh** để nạp model đó.
+Bản portable chạy model đã huấn luyện khi file này nằm trong `data/models`.
+
 ## Chế độ quyết định 100 ms
 
 Luồng ONNX Runtime chạy trên CPU, dùng 2 luồng cho PP-OCR và 4 luồng mặc định

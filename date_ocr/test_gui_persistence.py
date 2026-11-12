@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ['QT_QPA_PLATFORM']='offscreen'
 PROJECT=Path(__file__).resolve().parent
@@ -33,9 +34,13 @@ first.camera_serial.setText('MV-TEST-001');first.trigger_line.setCurrentText('Li
 first.exposure_us.setValue(800)
 first.roi_mode.setCurrentIndex(first.roi_mode.findData('fixed'))
 first.roi=FixedROI(700,900,600,240,1926,2568);first.update_roi()
+training_path=ROOT/'data/debug/test_training_folder'
+with patch('gui.QFileDialog.getExistingDirectory',return_value=str(training_path)):
+    first.choose_training_directory()
 first.save_configuration();app.processEvents()
 saved=json.loads(TEST_CONFIG.read_text(encoding='utf-8'))
 assert saved['roi_mode']=='fixed'
+assert Path(saved['training_directory'])==training_path
 assert saved['trial_expected_date']=='2027-03-15'
 assert saved['trial_expected_ab']=='09' and saved['trial_expected_dm']==2
 assert saved['inspection']=={
@@ -61,6 +66,7 @@ assert second.trial_date.date().toString('yyyy-MM-dd')=='2027-03-15'
 assert second.trial_ab.text()=='09' and second.trial_dm.currentText()=='2'
 assert second.deadline_ms.value()==150
 assert second.roi_mode.currentData()=='fixed'
+assert second.training_directory==training_path
 assert second.source_mode.currentData()=='hikrobot'
 assert second.camera_serial.text()=='MV-TEST-001'
 assert second.trigger_line.currentText()=='Line1'

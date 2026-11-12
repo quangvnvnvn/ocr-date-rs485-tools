@@ -58,7 +58,7 @@ def inspect_image(image,roi,engine,expected,deadline_ms=DEFAULT_DEADLINE_MS,*,pr
                     report['metrics']=metrics
                     artifacts.update(variants)
                     report['candidates'].append(dict(name='ppocr_v5_lines',image_variant='clahe',
-                        decoder='greedy',fields=readings,raw=raw))
+                        decoder='greedy',fields=readings,raw=candidate_raw(readings)))
             except LayoutError as exc:
                 report['ppocr_attempt']=dict(accepted=False,error_reason=str(exc))
             report['stage_ms']['ppocr']=round((time.perf_counter()-stage)*1000,2)

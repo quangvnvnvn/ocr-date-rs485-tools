@@ -1,34 +1,45 @@
 """Read complete inkjet DATE lines with the PP-OCR mobile CTC recognizer."""
+import re
 import sys
 
 import cv2
 import numpy as np
 
-from .date_parser import FIRST_LINE, SECOND_LINE
+from .date_parser import FIRST_LINE
 from .ocr_engine import application_root
 from .preprocessing import preprocess_lines
 
 
 MODEL_NAME = 'en_PP-OCRv5_rec_mobile.onnx'
+CUSTOM_MODEL_NAME = 'en_PP-OCRv5_custom.onnx'
+AB_TIME_LINE = re.compile(r'[ \t]*(?P<ab>[0-9]{2})[ \t]*(?P<time>[0-9]{2}:[0-9]{2})[ \t]*')
 
 
-def read_stamp(reader, crop):
+def prepare_stamp_lines(crop):
     gray, binary, boxes, angle = preprocess_lines(crop)
     contrast = cv2.createCLAHE(clipLimit=2., tileGridSize=(8, 8)).apply(gray)
     lines = [contrast[top:bottom, left:right] for left, top, right, bottom in boxes]
-    output = reader.read_lines(lines)
-    raw = '\n'.join(text for text, _ in output)
+    variants = dict(gray=gray, otsu=binary, clahe=contrast)
+    metrics = dict(angle=angle, rows=[(top, bottom) for _, top, _, bottom in boxes])
+    return lines, variants, metrics
+
+
+def stamp_fields(output):
     fields = {}
-    for pattern, (text, scores) in zip((FIRST_LINE, SECOND_LINE), output):
+    for pattern, (text, scores) in zip((FIRST_LINE, AB_TIME_LINE), output):
         match = pattern.fullmatch(text)
         if match is None:
-            return raw, {}, {}, {}
+            return {}
         for name, value in match.groupdict().items():
             left, right = match.span(name)
             fields[name] = dict(text=value, confidence=float(min(scores[left:right])))
-    variants = dict(gray=gray, otsu=binary, clahe=contrast)
-    metrics = dict(angle=angle, rows=[(top, bottom) for _, top, _, bottom in boxes])
-    return raw, fields, variants, metrics
+    return fields
+
+
+def read_stamp(reader, crop):
+    lines, variants, metrics = prepare_stamp_lines(crop)
+    output = reader.read_lines(lines)
+    return '\n'.join(text for text, _ in output), stamp_fields(output), variants, metrics
 
 
 class PPOCRReader:
@@ -41,7 +52,8 @@ class PPOCRReader:
         options = ort.SessionOptions()
         options.intra_op_num_threads = 2
         options.inter_op_num_threads = 1
-        self.session = ort.InferenceSession(str(model_path), sess_options=options,
+        model = model_path if isinstance(model_path, bytes) else str(model_path)
+        self.session = ort.InferenceSession(model, sess_options=options,
                                             providers=['CPUExecutionProvider'])
         self.input_name = self.session.get_inputs()[0].name
         alphabet = self.session.get_modelmeta().custom_metadata_map['character'].splitlines()
@@ -50,14 +62,18 @@ class PPOCRReader:
             raise ValueError('Từ điển ký tự PP-OCR không khớp model')
         self.read_lines((np.full((48, 400), 255, np.uint8), np.full((48, 220), 255, np.uint8)))
 
-    def read_lines(self, lines):
+    @staticmethod
+    def input_batch(lines):
         widths = [min(640, max(16, round(48 * row.shape[1] / row.shape[0]))) for row in lines]
         width = (max(widths) + 7) // 8 * 8
         batch = np.zeros((len(lines), 3, 48, width), np.float32)
         for index, (row, content_width) in enumerate(zip(lines, widths)):
             gray = cv2.resize(row, (content_width, 48))
             batch[index, :, :, :content_width] = gray.astype(np.float32) / 127.5 - 1
-        probabilities = self.session.run(None, {self.input_name: batch})[0]
+        return batch
+
+    def read_lines(self, lines):
+        probabilities = self.session.run(None, {self.input_name: self.input_batch(lines)})[0]
         return [self._decode(line) for line in probabilities]
 
     def _decode(self, probabilities):

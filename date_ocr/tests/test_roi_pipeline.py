@@ -68,7 +68,7 @@ class ROIAndPipelineTests(unittest.TestCase):
             def read_lines(self,lines):
                 assert len(lines)==2 and lines[0].shape[1]>lines[1].shape[1]
                 return [('NSX 220826 DM 2',[.99]*14+[self.dm_confidence]),
-                        ('12 12:52',[.99]*8)]
+                        ('1212:52',[.99]*7)]
 
         class LegacyReader:
             def read_field(self,image,field,decoder='greedy'):
@@ -79,6 +79,8 @@ class ROIAndPipelineTests(unittest.TestCase):
         report,_=inspect_image(image,roi,LegacyReader(),Expected('12',1),line_reader=reader)
         self.assertEqual(report['validation']['result'],'FAIL_DM')
         self.assertEqual(report['ocr_mode'],'PP_OCR_LINES')
+        self.assertEqual(report['ppocr_attempt']['raw'].splitlines()[1],'1212:52')
+        self.assertEqual(report['validation']['parsed']['time'],'12:52')
         reader.dm_confidence=.4
         report,_=inspect_image(image,roi,LegacyReader(),Expected('12',1),line_reader=reader)
         self.assertEqual(report['validation']['result'],'PASS')

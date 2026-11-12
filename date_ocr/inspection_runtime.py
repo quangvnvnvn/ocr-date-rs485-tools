@@ -12,7 +12,7 @@ import numpy as np
 from main import ROOT
 from ocr.alignment import AlignmentError, fixed_alignment_region, inspect_alignment
 from ocr.pipeline import DEFAULT_DEADLINE_MS, inspect_image
-from ocr.ppocr import MODEL_NAME, PPOCRReader
+from ocr.ppocr import CUSTOM_MODEL_NAME, MODEL_NAME, PPOCRReader
 from ocr.preprocessing import detect_dark_right_edge, locate_inkjet_rows
 from ocr.validator import Expected
 from roi.auto_roi import AutoROIDetector
@@ -30,6 +30,7 @@ class InspectionRuntime:
         self.calibrated_serial = None
         self.guided_detector = None
         self.line_reader = None
+        self.line_model_name = None
 
     def prepare(self, require_auto_roi: bool = False, status=None, *, require_guided_roi=False) -> None:
         if self.engine is None:
@@ -40,11 +41,14 @@ class InspectionRuntime:
         if require_guided_roi and self.guided_detector is None:
             self.guided_detector = GuidedROIDetector(ROOT / "data/calibration")
         if require_guided_roi and self.line_reader is None:
-            model = ROOT / "data/models" / MODEL_NAME
+            model_dir = ROOT / "data/models"
+            custom = model_dir / CUSTOM_MODEL_NAME
+            model = custom if custom.is_file() else model_dir / MODEL_NAME
             if model.is_file():
                 if status:
                     status("Đang làm nóng PP-OCR đọc nguyên dòng…")
                 self.line_reader = PPOCRReader(model)
+                self.line_model_name = model.name
             elif status:
                 status("Chưa có model PP-OCR, đang dùng bộ đọc từng trường.")
         if require_auto_roi and self.auto_detector is None:
@@ -161,6 +165,8 @@ class InspectionRuntime:
                 allow_unrotated=compact_roi or (roi_mode=="guided" and not check_alignment),
                 line_reader=self.line_reader if roi_mode=="guided" else None,
             )
+            if report.get("ocr_mode") == "PP_OCR_LINES":
+                report["ppocr_model"] = self.line_model_name
             if search_bbox is not None:
                 report["search_bbox"] = search_bbox
                 report["stage_ms"]["guided_roi"] = round(guided_ms, 2)
