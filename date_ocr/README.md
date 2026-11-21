@@ -91,16 +91,18 @@ Mở `OCR_DATE.exe` hoặc lối tắt **OCR DATE** trên Desktop để dùng gi
 
 ### Bản cài đặt cho máy khác
 
-Giải nén `OCR_DATE_BAN_CAI_DAT_Windows_64bit_2026-10-29.zip`, chạy
-`OCR_DATE_Setup_2026-10-29.exe` rồi chọn Next → Install. Bộ cài chứa ứng dụng,
-runtime và model; tự tạo lối tắt **OCR DATE - Hikrobot RS485** trên Desktop.
+Giải nén `OCR_DATE_Bo_cai_va_Driver_Hikrobot_2026-11-21.zip`. Chạy bộ cài MVS
+trong thư mục `Driver_Hikrobot` và chọn Development/Python SDK. Tiếp theo chạy
+`OCR_DATE_Setup_2026-11-21.exe`, chọn Next → Install. Bộ cài chứa ứng dụng,
+runtime và model PP-OCRv5, tự tạo lối tắt **OCR DATE - Hikrobot RS485** trên Desktop.
 Cài mới dùng thư mục `D:\Apps\OCR_DATE` nếu có ổ D:, nếu không dùng
 `%LOCALAPPDATA%\Programs\OCR_DATE`; có thể chọn thư mục khác có quyền ghi.
 Cài đè giữ `config/config.json`; gỡ ứng dụng giữ cấu hình và báo cáo đã tạo.
 Camera thật cần cài thêm HIKROBOT MVS 64-bit cùng Python SDK của hãng.
 
-Tạo bộ cài bằng `./build_installer.ps1` (cần Inno Setup 6); dùng
-`-SkipPortableBuild` khi payload portable hiện tại đã được kiểm tra.
+Tạo bộ cài bằng `./build_installer.ps1 -DriverInstaller 'D:\...\MVS_STD_5.1.0_260909.exe'`
+(cần Inno Setup 6). Script kiểm tra chữ ký Hikrobot và ghi SHA256 cho từng file.
+Dùng `-SkipPortableBuild` khi payload portable của cùng ngày đã được kiểm tra.
 Kiểm tra cài mới/cài đè/gỡ bằng `./tools/test_installer.ps1` khi chưa có bản cài
 đăng ký trên máy. Kiểm thử này không mở camera hay phát tín hiệu RS485.
 

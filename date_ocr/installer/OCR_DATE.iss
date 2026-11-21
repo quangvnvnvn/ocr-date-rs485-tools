@@ -4,12 +4,18 @@
 #ifndef InitialConfig
   #error InitialConfig must point to the sanitized fresh-install config
 #endif
+#ifndef ReleaseVersion
+  #define ReleaseVersion "2026.11.21.1"
+#endif
+#ifndef BuildDate
+  #define BuildDate "2026-11-21"
+#endif
 
 [Setup]
 AppId={{3C38704D-89B2-44FB-ABA1-0AF396C43EB8}
 AppName=OCR DATE - Hikrobot RS485
-AppVersion=2026.10.29.5
-AppVerName=OCR DATE - Hikrobot RS485 2026.10.29.5
+AppVersion={#ReleaseVersion}
+AppVerName=OCR DATE - Hikrobot RS485 {#ReleaseVersion}
 AppPublisher=OCR DATE
 DefaultDirName={code:DefaultInstallDirectory}
 DefaultGroupName=OCR DATE - Hikrobot RS485
@@ -18,7 +24,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-OutputBaseFilename=OCR_DATE_Setup_2026-10-29
+OutputBaseFilename=OCR_DATE_Setup_{#BuildDate}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -35,9 +41,10 @@ Name: desktopicon; Description: "Tao loi tat OCR DATE tren Desktop"; Flags: chec
 Name: "{app}\data\debug"; Flags: uninsneveruninstall
 Name: "{app}\data\logs"; Flags: uninsneveruninstall
 Name: "{app}\data\production"; Flags: uninsneveruninstall
+Name: "{app}\data\training"; Flags: uninsneveruninstall
 
 [Files]
-Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "\config\config.json,\data\debug\*,\data\logs\*,\data\production\*,\README.md"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "\config\config.json,\data\debug\*,\data\logs\*,\data\production\*,\data\training\*,\README.md"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#InitialConfig}"; DestDir: "{app}\config"; DestName: config.json; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "HUONG_DAN_CAI_DAT.txt"; DestDir: "{app}"; Flags: ignoreversion

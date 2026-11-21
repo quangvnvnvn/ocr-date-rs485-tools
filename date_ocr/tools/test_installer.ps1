@@ -1,8 +1,10 @@
-param()
+param(
+    [string]$SetupPath = (Join-Path $PSScriptRoot '..\release_installer\2026-11-21\delivery\OCR_DATE_Setup_2026-11-21.exe')
+)
 $ErrorActionPreference = 'Stop'
 $project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $release = Join-Path $project 'release_installer'
-$setup = Join-Path $release 'delivery\OCR_DATE_Setup_2026-10-29.exe'
+$setup = (Resolve-Path -LiteralPath $SetupPath).Path
 $shortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'OCR DATE - Hikrobot RS485.lnk'
 $registry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{3C38704D-89B2-44FB-ABA1-0AF396C43EB8}_is1'
 if ((Test-Path -LiteralPath $registry) -or (Test-Path -LiteralPath $shortcut)) {
@@ -38,6 +40,11 @@ try {
         throw 'Fresh-install defaults contain machine-specific or active I/O settings'
     }
     $report.safe_defaults = $true
+    if (-not (Test-Path -LiteralPath (Join-Path $install 'data\models\en_PP-OCRv5_rec_mobile.onnx'))) {
+        throw 'Installed application is missing the PP-OCR model'
+    }
+    if ($config.training_directory) { throw 'Fresh-install sample directory contains a host-specific path' }
+    $report.ppocr_model = $true
     $env:OCR_DATE_CONFIG = $null
     $env:QT_QPA_PLATFORM = 'offscreen'
     $env:OCR_DATE_PORTABLE_SMOKE_MARKER = Join-Path $verify 'ocr-smoke.json'
@@ -47,10 +54,15 @@ try {
     if ($smoke.result -ne 'PASS' -or -not $smoke.deadline_met) { throw 'OCR smoke did not pass' }
     $report.ocr = $smoke
     $config.ejector.decision_delay_ms = 525
+    $training = Join-Path $install 'data\training'
+    $config | Add-Member -NotePropertyName training_directory -NotePropertyValue $training -Force
     [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
     $before = (Get-FileHash -LiteralPath $configPath).Hash
     $retainedLog = Join-Path $install 'data\logs\installer-retention-test.txt'
     [IO.File]::WriteAllText($retainedLog, 'Retain operator data on uninstall')
+    $retainedSample = Join-Path $training 'installer-check\sample.json'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $retainedSample) -Force | Out-Null
+    [IO.File]::WriteAllText($retainedSample, '{"label_text":"verified sample"}')
     $p = Start-Process -FilePath $setup -ArgumentList ($common + ('/LOG="' + (Join-Path $verify 'upgrade.log') + '"')) -PassThru -Wait -WindowStyle Hidden
     if ($p.ExitCode -ne 0 -or (Get-FileHash -LiteralPath $configPath).Hash -ne $before) { throw 'Upgrade changed existing config' }
     $report.upgrade_preserves_config = $true
@@ -66,7 +78,8 @@ try {
 }
 if ((Test-Path -LiteralPath (Join-Path $install 'OCR_DATE.exe')) -or
     (Test-Path -LiteralPath $shortcut) -or (Test-Path -LiteralPath $registry)) { throw 'Uninstall left executable/shortcut/registration' }
-if (-not (Test-Path -LiteralPath $configPath) -or -not (Test-Path -LiteralPath $retainedLog)) { throw 'Uninstall removed operator data' }
+if (-not (Test-Path -LiteralPath $configPath) -or -not (Test-Path -LiteralPath $retainedLog) -or
+    -not (Test-Path -LiteralPath $retainedSample)) { throw 'Uninstall removed operator data' }
 $report.uninstall_preserves_data = $true
 $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $verify 'verification.json') -Encoding UTF8
 $report | ConvertTo-Json -Depth 20

@@ -1,33 +1,40 @@
-﻿OCR DATE - BẢN CÀI ĐẶT WINDOWS 64-BIT
-Phiên bản: 2026.10.29.5
+﻿OCR DATE - BỘ CÀI WINDOWS 64-BIT VÀ DRIVER CAMERA
+Phiên bản 2026.11.21.1
 
-1. Giải nén ZIP, chạy OCR_DATE_Setup_2026-10-29.exe.
-2. Bấm Next, chọn thư mục cài đặt rồi bấm Install.
-   Mặc định dùng D:\Apps\OCR_DATE nếu có ổ D:, nếu không dùng thư mục
-   Programs trong LocalAppData của tài khoản Windows đang đăng nhập.
-   Chọn thư mục bạn có quyền ghi; ứng dụng lưu cấu hình và kết quả tại đây.
-3. Sau khi cài, mở lối tắt "OCR DATE - Hikrobot RS485" trên Desktop.
+1. Chép file ZIP sang máy mới và giải nén toàn bộ.
+2. Mở thư mục Driver_Hikrobot, chạy MVS_STD_5.1.0_260909.exe.
+   Chấp nhận yêu cầu quyền quản trị của Windows. Khi chọn thành phần cài,
+   chọn driver camera GigE/USB, Development và Python Samples/SDK.
+   Giữ đường dẫn MVS mặc định để ứng dụng tự tìm SDK. Khởi động lại máy
+   nếu bộ cài driver yêu cầu.
+3. Chạy OCR_DATE_Setup_2026-11-21.exe, chọn Next và Install.
+   Ứng dụng mặc định cài vào D:\Apps\OCR_DATE nếu có ổ D.
+   Có thể chọn thư mục khác có quyền ghi trên máy mới.
+4. Mở lối tắt OCR DATE - Hikrobot RS485 trên Desktop.
+5. Vào Cài đặt, chọn camera và ngõ trigger Line0/Line1.
+   Dùng Camera Live chỉnh lens, phơi sáng và đèn. Dùng Chạy thử chụp 1 ảnh,
+   chọn ngày NSX, AB và DM. Khoanh vùng tìm mã và bấm Lưu vùng.
+6. Trong Cài đặt, mục Thư mục lưu mẫu mặc định dùng D:\OCR_DATE_Training
+   trên máy có ổ D. Chọn thư mục khác tại đây nếu cần.
+   Mỗi lần chụp thử lưu ảnh gốc, ROI và kết quả OCR, kể cả ảnh lỗi.
+   Bấm Gán nhãn mẫu để kiểm tra và sửa chữ thực tế trên ảnh.
 
-Bộ cài có sẵn ứng dụng, Python runtime, Qt, ONNX CPU, OpenCV, pyserial,
-model OCR và ảnh mẫu. Không phải cài Python hoặc dùng GPU rời.
+Gói có ứng dụng, runtime, model PP-OCRv5, model dự phòng, ảnh mẫu và bộ cài
+Hikrobot MVS 5.1.0. Cài và đọc OCR được khi máy mới đang ngoại tuyến.
+Huấn luyện lại model dùng mã nguồn và môi trường Python có PyTorch, ONNX.
+Hướng dẫn huấn luyện nằm trong README.md của ứng dụng.
 
-NẾU DÙNG PHẦN CỨNG
-- Cài HIKROBOT MVS 64-bit và thành phần Python SDK (thư mục MvImport).
-  Driver/SDK của hãng chưa nằm trong bộ cài này. Xem HIKROBOT_SETUP.txt.
-- USB-RS485 cần driver đúng loại bộ chuyển đổi USB đang dùng.
-- Cài mới khởi động ở chế độ ảnh tĩnh; chưa chọn camera/COM và RS485 tắt.
-- Chọn COM, slave, DO, Delay sau NG (ms), Xung (ms) rồi lưu cấu hình.
-- "TEST NG → XI LANH" phát một xung DO THẬT sau delay khi bạn bấm nút.
+Khi dùng RS485, cài driver đúng loại bộ chuyển đổi USB-RS485 của bạn.
+Trong Cài đặt, chọn COM, slave, DO, Delay sau NG và thời gian xung.
+Nút TEST NG → XI LANH phát xung DO thật theo cấu hình khi được bấm.
 
-CẬP NHẬT VÀ GỠ CÀI ĐẶT
-Chạy lại bộ cài vào cùng thư mục để cập nhật. Cấu hình config\config.json
-đã lưu được giữ nguyên. Không bật tự động camera hay xi lanh khi cài.
-Gỡ ứng dụng bằng Windows Settings > Apps > OCR DATE - Hikrobot RS485.
-Cấu hình và dữ liệu do bạn tạo trong data\debug, data\logs được giữ lại.
-Chạy thật không lưu ảnh. Kết quả nằm trong data\production\OCR_DATE_YYYY-MM-DD.xlsx,
-theo ngày kiểm tra (giờ Việt Nam), cập nhật mỗi 5 giây và khi ngắt camera.
-Đóng Excel trước khi tiếp tục cập nhật file. Kết quả còn chờ được giữ trong
-nhật ký phục hồi nội bộ; kết nối lại sẽ xuất tiếp. Gỡ cài đặt giữ sổ sản xuất.
+Chạy thật lưu sổ theo ngày Việt Nam tại
+data\production\OCR_DATE_YYYY-MM-DD.xlsx trong thư mục ứng dụng.
+File cập nhật nền mỗi 5 giây và khi ngắt camera. Đóng Excel khi đang ghi.
 
-Bộ cài dành cho Windows 10/11 64-bit. Cần đo lại thời gian xử lý trên máy
-đích i5 Gen 8 / RAM 8 GB và hiệu chuẩn độ trễ xi lanh tại dây chuyền.
+Chạy lại bộ cài vào cùng thư mục để cập nhật và giữ cấu hình đã lưu.
+Gỡ ứng dụng qua Windows Settings > Apps > OCR DATE - Hikrobot RS485.
+Cấu hình và dữ liệu do người dùng tạo được giữ lại.
+
+Dành cho Windows 10/11 64-bit. Cần đo thời gian xử lý và hiệu chuẩn xi lanh
+trên máy đích cùng camera, đèn và tốc độ băng tải thực tế.

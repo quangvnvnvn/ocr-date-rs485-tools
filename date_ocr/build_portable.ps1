@@ -1,5 +1,7 @@
 param(
-    [string]$OutputRoot = (Join-Path $PSScriptRoot "release_build_lite")
+    [string]$OutputRoot = (Join-Path $PSScriptRoot "release_build_lite"),
+    [ValidatePattern('^\d{4}-\d{2}-\d{2}$')]
+    [string]$BuildDate = '2026-11-21'
 )
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
@@ -142,9 +144,9 @@ OCR DATE - CPU LITE - HIKROBOT TRIGGER
    khong can camera. Chi bam khi khu vuc day da an toan.
 
 Ban CPU Lite khong can Python, Internet, GPU roi, CUDA hay PyTorch. ONNX Runtime
-CPU dung 4 luong mac dinh, phu hop muc tieu Core i5 Gen 8 / RAM 8 GB. Nut LUU CAU
-HINH luu serial camera, Line0/Line1, ROI, AB, DM, ngay NSX, confidence va gioi han
-lech goc de lan mo sau khoi phuc giong lan truoc.
+CPU dung 2 luong cho PP-OCR, phu hop muc tieu Core i5 Gen 8 / RAM 8 GB. Nut LUU CAU
+HINH luu serial camera, Line0/Line1, ROI, AB, DM, ngay NSX, confidence va
+thu muc luu mau de lan mo sau khoi phuc giong lan truoc.
 
 Can benchmark lai 100 ms tren dung may dich, camera, resolution, exposure va chu ky
 trigger truoc khi dua vao day chuyen. Log: data\logs. Anh/report: data\debug.
@@ -152,13 +154,13 @@ trigger truoc khi dua vao day chuyen. Log: data\logs. Anh/report: data\debug.
 
 @"
 OCR DATE PORTABLE - CPU LITE - HIKROBOT HARDWARE TRIGGER
-Build: 2026-10-29
+Build: $BuildDate
 Windows 10/11 64-bit; Python 3.12 runtime bundled
 ONNX Runtime 1.30.0 CPU; OpenCV headless 4.14.0; PySide6 6.11.2
 No PyTorch, EasyOCR runtime, CUDA or discrete GPU required.
 HIKROBOT MVS 64-bit is required only for a real camera and is not bundled.
 "@ | Set-Content -LiteralPath (Join-Path $app "PHIEN_BAN.txt") -Encoding UTF8
 
-$zip = Join-Path $resolvedOutput "OCR_DATE_HIKROBOT_RS485_CPU_Lite_Windows_Portable_2026-10-29.zip"
+$zip = Join-Path $resolvedOutput "OCR_DATE_HIKROBOT_RS485_CPU_Lite_Windows_Portable_$BuildDate.zip"
 Compress-Archive -LiteralPath $app -DestinationPath $zip -CompressionLevel Optimal
 Write-Output $zip
